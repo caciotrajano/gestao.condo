@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Portal do Síndico Profissional</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="https://unpkg.com/recharts@2.1.12/umd/Recharts.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+  * { box-sizing: border-box; font-family: 'DM Sans', system-ui, sans-serif; }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  body { margin: 0; background: #f8fafc; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+function _optionalChain(ops) { let lastAccessLHS = undefined; let value = ops[0]; let i = 1; while (i < ops.length) { const op = ops[i]; const fn = ops[i + 1]; i += 2; if ((op === 'optionalAccess' || op === 'optionalCall') && value == null) { return undefined; } if (op === 'access' || op === 'optionalAccess') { lastAccessLHS = value; value = fn(value); } else if (op === 'call' || op === 'optionalCall') { value = fn((...args) => value.call(lastAccessLHS, ...args)); lastAccessLHS = undefined; } } return value; }const { useState, useEffect, useCallback } = React;
+const { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
+
+// ═══════════════════════════════════════════════════════════
+// CONFIGURAÇÃO SUPABASE — substitua com suas chaves
+// supabase.com → seu projeto → Project Settings → API
+// ═══════════════════════════════════════════════════════════
+const SUPA_URL = "https://bfclbnpnvtsptnxtmbgm.supabase.co";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmY2xibnBudnRzcHRueHRtYmdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NTk5OTAsImV4cCI6MjA4ODEzNTk5MH0.6EGZbBdxCpKtPz96k_9rBEhnEQ7qVlBrC7WogT0gDL4";
+// ═══════════════════════════════════════════════════════════
+const { createClient } = supabase;
+const sb = createClient(SUPA_URL, SUPA_KEY);
+const uid = () => Math.random().toString(36).slice(2, 10);
+const brl = (v) => Number(v||0).toLocaleString("pt-BR", {style:"currency", currency:"BRL"});
+
+// DB helpers — todas as operações vão para o Supabase
+const db = {
+  getCondos:  ()       => sb.from("condominios").select("*").order("nome"),
+  addCondo:   d        => sb.from("condominios").insert(d).select().single(),
+  updCondo:   (id,d)   => sb.from("condominios").update(d).eq("id",id).select().single(),
+  delCondo:   id       => sb.from("condominios").delete().eq("id",id),
+  getFin:     ()       => sb.from("financeiro").select("*").order("data",{ascending:false}),
+  addFin:     d        => sb.from("financeiro").insert(d).select().single(),
+  updFin:     (id,d)   => sb.from("financeiro").update(d).eq("id",id).select().single(),
+  delFin:     id       => sb.from("financeiro").delete().eq("id",id),
+  getInad:    ()       => sb.from("inadimplencia").select("*").order("created_at",{ascending:false}),
+  addInad:    d        => sb.from("inadimplencia").insert(d).select().single(),
+  updInad:    (id,d)   => sb.from("inadimplencia").update(d).eq("id",id).select().single(),
+  delInad:    id       => sb.from("inadimplencia").delete().eq("id",id),
+  getOco:     ()       => sb.from("ocorrencias").select("*").order("created_at",{ascending:false}),
+  addOco:     d        => sb.from("ocorrencias").insert(d).select().single(),
+  updOco:     (id,d)   => sb.from("ocorrencias").update(d).eq("id",id).select().single(),
+  delOco:     id       => sb.from("ocorrencias").delete().eq("id",id),
+  getMan:     ()       => sb.from("manutencoes").select("*").order("created_at",{ascending:false}),
+  addMan:     d        => sb.from("manutencoes").insert(d).select().single(),
+  updMan:     (id,d)   => sb.from("manutencoes").update(d).eq("id",id).select().single(),
+  delMan:     id       => sb.from("manutencoes").delete().eq("id",id),
+  getOrc:     (cid,a)  => sb.from("orcamento").select("*").eq("condo_id",cid).eq("ano",a),
+  upsertOrc:  d        => sb.from("orcamento").upsert(d,{onConflict:"condo_id,ano,categoria"}).select().single(),
+};
+
+// ── Constantes ─────────────────────────────────────────────────────────────────
+const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+const MESES_S = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+const CATS = ["Taxa Condominial","Fundo de Reserva","Manutenção","Funcionários","Água","Energia","Seguro","Administração","Multa/Juros","Outros"];
+const COLORS = ["#10B981","#3B82F6","#F59E0B","#EF4444","#8B5CF6","#EC4899","#14B8A6","#F97316","#6366F1","#84CC16"];
+
+// ── Dados de exemplo ───────────────────────────────────────────────────────────
+// SEED_CONDOS removido — dados vêm do Supabase
+
+// SEED_FIN removido — dados vêm do Supabase
+
+// SEED_INAD removido — dados vêm do Supabase
+
+// SEED_OCO removido — dados vêm do Supabase
+
+// SEED_MAN removido — dados vêm do Supabase
+
+
+// ── UI Helpers ─────────────────────────────────────────────────────────────────
+const Card = ({children, className=""}) => (
+  React.createElement('div', { className: `bg-white rounded-2xl shadow-sm border border-slate-100 ${className}`}, children)
+);
+
+const KPI = ({label, value, sub, color="blue", icon}) => {
+  const c = {blue:"from-blue-500 to-blue-600", green:"from-emerald-500 to-emerald-600", red:"from-red-500 to-red-600", amber:"from-amber-400 to-amber-500", purple:"from-purple-500 to-purple-600", teal:"from-teal-500 to-teal-600"};
+  return (
+    React.createElement('div', { className: `bg-gradient-to-br ${c[color]||c.blue} rounded-2xl p-4 text-white shadow-md`}
+      , React.createElement('div', { className: "flex justify-between items-start"  }
+        , React.createElement('div', {}
+          , React.createElement('p', { className: "text-xs font-medium opacity-80"  }, label)
+          , React.createElement('p', { className: "text-xl font-bold mt-1"  }, value)
+          , sub && React.createElement('p', { className: "text-xs opacity-70 mt-0.5"  }, sub)
+        )
+        , icon && React.createElement('span', { className: "text-2xl opacity-60" }, icon)
+      )
+    )
+  );
+};
+
+const Badge = ({children, color="gray"}) => {
+  const m = {green:"bg-emerald-100 text-emerald-700", red:"bg-red-100 text-red-700", yellow:"bg-amber-100 text-amber-700", blue:"bg-blue-100 text-blue-700", gray:"bg-slate-100 text-slate-500", purple:"bg-purple-100 text-purple-700"};
+  return React.createElement('span', { className: `px-2 py-0.5 rounded-full text-xs font-bold ${m[color]||m.gray}`}, children);
+};
+
+const sc = s => ({Pago:"green",Resolvida:"green","Concluída":"green",Regularizado:"green","Em aberto":"red",Aberta:"red",Inadimplente:"red",Cancelado:"gray",Cancelada:"gray","Em andamento":"yellow",Acordo:"yellow",Agendada:"blue","Em execução":"yellow"}[s]||"gray");
+
+const Modal = ({title, onClose, children}) => (
+  React.createElement('div', { style: {position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",padding:16,background:"rgba(15,23,42,0.6)"}}
+    , React.createElement('div', { className: "bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col"      , style: {maxHeight:"88vh"}}
+      , React.createElement('div', { className: "flex items-center justify-between px-6 py-4 border-b border-slate-100"      }
+        , React.createElement('h3', { className: "text-base font-bold text-slate-800"  }, title)
+        , React.createElement('button', { onClick: onClose, className: "w-8 h-8 rounded-full bg-slate-100 hover:bg-red-100 text-slate-500 hover:text-red-500 font-bold flex items-center justify-center"          }, "×")
+      )
+      , React.createElement('div', { className: "overflow-y-auto p-6 flex-1"  }, children)
+    )
+  )
+);
+
+const F = ({label, children}) => (
+  React.createElement('div', { className: "flex flex-col gap-1"  }
+    , React.createElement('label', { className: "text-xs font-bold text-slate-400 uppercase tracking-wider"    }, label)
+    , children
+  )
+);
+const Inp = (p) => React.createElement('input', { ...p, className: "border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-800 w-full"           });
+const Sel = ({children, ...p}) => React.createElement('select', { ...p, className: "border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-800 w-full"           }, children);
+const Tex = (p) => React.createElement('textarea', { ...p, rows: 2, className: "border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white text-slate-800 resize-none w-full"            });
+const Btn = ({children, onClick, v="primary", s="md", disabled=false}) => {
+  const sz = {sm:"px-3 py-1.5 text-xs", md:"px-4 py-2 text-sm", lg:"px-5 py-2.5 text-sm"};
+  const vs = {primary:"bg-blue-600 hover:bg-blue-700 text-white shadow-sm", danger:"bg-red-500 hover:bg-red-600 text-white", ghost:"bg-slate-100 hover:bg-slate-200 text-slate-700", success:"bg-emerald-500 hover:bg-emerald-600 text-white"};
+  return React.createElement('button', { onClick: onClick, disabled: disabled, className: `rounded-xl font-semibold transition-all flex items-center gap-1.5 disabled:opacity-40 cursor-pointer ${sz[s]} ${vs[v]}`}, children);
+};
+
+// ── Dashboard ──────────────────────────────────────────────────────────────────
+function Dashboard({condos, financeiro, inadimplencia, ocorrencias, manutencoes, sel}) {
+  const fin  = sel ? financeiro.filter(f=>f.condo_id===sel.id) : financeiro;
+  const inad = sel ? inadimplencia.filter(i=>i.condo_id===sel.id) : inadimplencia;
+  const oco  = sel ? ocorrencias.filter(o=>o.condo_id===sel.id) : ocorrencias;
+  const man  = sel ? manutencoes.filter(m=>m.condo_id===sel.id) : manutencoes;
+  const rec  = fin.filter(f=>f.tipo==="Receita").reduce((s,f)=>s+Number(f.valor||0),0);
+  const dep  = fin.filter(f=>f.tipo==="Despesa").reduce((s,f)=>s+Number(f.valor||0),0);
+  const inadN= inad.filter(i=>i && i.status==="Inadimplente").length;
+  const inadV= inad.filter(i=>i && i.status==="Inadimplente").reduce((s,i)=>s+Number(i.valor||0),0);
+  const ocoA = oco.filter(o=>o && o.status==="Aberta"||o.status==="Em andamento").length;
+  const manP = man.filter(m=>m && m.status==="Agendada").length;
+
+  const monthly = MESES_S.map((m,i)=>({
+    mes:m,
+    Receitas: fin.filter(f=>f.mes===MESES[i]&&f.tipo==="Receita").reduce((s,f)=>s+Number(f.valor||0),0),
+    Despesas: fin.filter(f=>f.mes===MESES[i]&&f.tipo==="Despesa").reduce((s,f)=>s+Number(f.valor||0),0),
+  }));
+  const catPie = CATS.map((c,i)=>({name:c, value:fin.filter(f=>f.categoria===c&&f.tipo==="Despesa").reduce((s,f)=>s+Number(f.valor||0),0), fill:COLORS[i]})).filter(d=>d.value>0);
+
+  return (
+    React.createElement('div', { className: "space-y-5"}
+      , React.createElement('div', {}
+        , React.createElement('h2', { className: "text-xl font-bold text-slate-800"  }, "Dashboard")
+        , React.createElement('p', { className: "text-slate-400 text-sm" }, sel ? sel.nome : `Todos os ${condos.length} condomínio(s)`)
+      )
+      , React.createElement('div', { className: "grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3"    }
+        , React.createElement(KPI, { label: "Receitas",     value: brl(rec),           color: "green",  icon: "💰"})
+        , React.createElement(KPI, { label: "Despesas",     value: brl(dep),           color: "red",    icon: "📉"})
+        , React.createElement(KPI, { label: "Saldo",        value: brl(rec-dep),       color: rec-dep>=0?"teal":"red", icon: "⚖️"})
+        , React.createElement(KPI, { label: "Inadimplentes", value: `${inadN} unid.`, sub: brl(inadV), color: "amber", icon: "⚠️"})
+        , React.createElement(KPI, { label: "Ocorrências",  value: `${ocoA} abertas`, color: "purple", icon: "📩"})
+        , React.createElement(KPI, { label: "Manutenções",  value: `${manP} pend.`,   color: "blue",   icon: "🔧"})
+      )
+      , React.createElement('div', { className: "grid grid-cols-1 lg:grid-cols-2 gap-5"   }
+        , React.createElement(Card, { className: "p-5"}
+          , React.createElement('h3', { className: "font-bold text-slate-700 mb-3 text-sm"   }, "Receitas × Despesas por Mês"    )
+          , React.createElement(ResponsiveContainer, { width: "100%", height: 220}
+            , React.createElement(BarChart, { data: monthly}
+              , React.createElement(CartesianGrid, { strokeDasharray: "3 3" , stroke: "#f1f5f9"})
+              , React.createElement(XAxis, { dataKey: "mes", tick: {fontSize:10}})
+              , React.createElement(YAxis, { tick: {fontSize:10}, tickFormatter: v=>v>999?`${(v/1000).toFixed(0)}k`:v})
+              , React.createElement(Tooltip, { formatter: v=>brl(v)})
+              , React.createElement(Legend, { wrapperStyle: {fontSize:11}})
+              , React.createElement(Bar, { dataKey: "Receitas", fill: "#10B981", radius: [3,3,0,0]})
+              , React.createElement(Bar, { dataKey: "Despesas", fill: "#EF4444", radius: [3,3,0,0]})
+            )
+          )
+        )
+        , React.createElement(Card, { className: "p-5"}
+          , React.createElement('h3', { className: "font-bold text-slate-700 mb-3 text-sm"   }, "Despesas por Categoria"  )
+          , catPie.length > 0
+            ? React.createElement(ResponsiveContainer, { width: "100%", height: 220}
+                , React.createElement(PieChart, {}
+                  , React.createElement(Pie, { data: catPie, cx: "50%", cy: "50%", outerRadius: 85, dataKey: "value",
+                    label: ({name,percent})=>`${name.split(" ")[0]} ${(percent*100).toFixed(0)}%`,
+                    labelLine: false, fontSize: 10}
+                    , catPie.map((e,i)=>React.createElement(Cell, { key: i, fill: e.fill}))
+                  )
+                  , React.createElement(Tooltip, { formatter: v=>brl(v)})
+                )
+              )
+            : React.createElement('div', { className: "h-52 flex items-center justify-center text-slate-300 text-sm"     }, "Sem despesas registradas"  )
+          
+        )
+      )
+      , React.createElement(Card, { className: "p-5"}
+        , React.createElement('h3', { className: "font-bold text-slate-700 mb-3 text-sm"   }, "Resumo por Condomínio"  )
+        , React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 gap-3"   }
+          , condos.map(c=>{
+            const cf = financeiro.filter(f=>f.condo_id===c.id);
+            const cr = cf.filter(f=>f.tipo==="Receita").reduce((s,f)=>s+Number(f.valor||0),0);
+            const cd = cf.filter(f=>f.tipo==="Despesa").reduce((s,f)=>s+Number(f.valor||0),0);
+            const ci = inadimplencia.filter(i=>i.condo_id===c.id&&i.status==="Inadimplente").length;
+            return (
+              React.createElement('div', { key: c.id, className: "flex items-center gap-3 p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors"       }
+                , React.createElement('div', { className: "w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold flex-shrink-0 text-sm"         , style: {background:c.cor||"#3B82F6"}}, c.sigla||c.nome[0])
+                , React.createElement('div', { className: "flex-1 min-w-0" }
+                  , React.createElement('p', { className: "font-bold text-slate-700 text-sm truncate"   }, c.nome)
+                  , React.createElement('p', { className: "text-xs text-slate-400" }, c.unidades, " unidades" )
+                )
+                , React.createElement('div', { className: "text-right flex-shrink-0" }
+                  , React.createElement('p', { className: "text-xs font-bold text-emerald-600"  }, brl(cr))
+                  , React.createElement('p', { className: "text-xs text-red-500" }, brl(cd))
+                )
+                , ci > 0 && React.createElement(Badge, { color: "red"}, ci, " inad." )
+              )
+            );
+          })
+        )
+      )
+    )
+  );
+}
+
+// ── Condomínios ────────────────────────────────────────────────────────────────
+function Condos({condos, setCondos, user}) {
+  const [modal, setModal] = useState(false);
+  const [form, setForm]   = useState({});
+  const blank = {nome:"",sigla:"",endereco:"",cnpj:"",unidades:"",administradora:"",contato:"",cor:"#3B82F6"};
+  const [saving,setSaving]=useState(false);
+  const save_ = async() => {
+    if(!form.nome)return; setSaving(true);
+    if(form.id){ const{data}=await db.updCondo(form.id,form); setCondos(p=>p.map(c=>c.id===form.id?data:c)); }
+    else { const{data}=await db.addCondo({...form,owner_id:user.id}); setCondos(p=>[...p,data]); }
+    setSaving(false); setModal(false);
+  };
+  const del = async(id) => { if(!confirm("Excluir condomínio e todos os dados vinculados?"))return; await db.delCondo(id); setCondos(p=>p.filter(c=>c.id!==id)); };
+  return (
+    React.createElement('div', { className: "space-y-5"}
+      , React.createElement('div', { className: "flex items-center justify-between"  }
+        , React.createElement('div', {}, React.createElement('h2', { className: "text-xl font-bold text-slate-800"  }, "Condomínios"), React.createElement('p', { className: "text-slate-400 text-sm" }, condos.length, " cadastrado(s)" ))
+        , React.createElement(Btn, { onClick: ()=>{setForm(blank);setModal(true);}}, "＋ Novo" )
+      )
+      , React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"    }
+        , condos.map(c=>(
+          React.createElement(Card, { key: c.id, className: "p-5 hover:shadow-md transition-shadow"  }
+            , React.createElement('div', { className: "flex items-start gap-3 mb-4"   }
+              , React.createElement('div', { className: "w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg flex-shrink-0"         , style: {background:c.cor||"#3B82F6"}}, c.sigla||c.nome[0])
+              , React.createElement('div', { className: "flex-1 min-w-0" }, React.createElement('h3', { className: "font-bold text-slate-800 truncate text-sm"   }, c.nome), React.createElement('p', { className: "text-xs text-slate-400 truncate"  }, c.endereco))
+            )
+            , React.createElement('div', { className: "grid grid-cols-2 gap-2 mb-4"   }
+              , [["Unidades",c.unidades||"—"],["CNPJ",c.cnpj||"—"],["Administradora",c.administradora||"—"],["Contato",c.contato||"—"]].map(([l,v])=>(
+                React.createElement('div', { key: l, className: "bg-slate-50 rounded-lg p-2"  }, React.createElement('p', { className: "text-xs text-slate-400" }, l), React.createElement('p', { className: "font-semibold text-slate-700 text-xs truncate"   }, v))
+              ))
+            )
+            , React.createElement('div', { className: "flex gap-2" }
+              , React.createElement(Btn, { v: "ghost", s: "sm", onClick: ()=>{setForm(c);setModal(true);}}, "✏️ Editar" )
+              , React.createElement(Btn, { v: "danger", s: "sm", onClick: ()=>del(c.id)}, "🗑 Excluir" )
+            )
+          )
+        ))
+        , React.createElement('div', { onClick: ()=>{setForm(blank);setModal(true);}, className: "border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition-all"             }
+          , React.createElement('span', { className: "text-3xl"}, "🏢"), React.createElement('p', { className: "text-slate-400 font-semibold text-sm"  }, "Novo condomínio" )
+        )
+      )
+      , modal && React.createElement(Modal, { title: form.id?"Editar Condomínio":"Novo Condomínio", onClose: ()=>setModal(false)}
+        , React.createElement('div', { className: "grid grid-cols-2 gap-3"  }
+          , React.createElement(F, { label: "Nome"}, React.createElement(Inp, { value: form.nome||"", onChange: e=>setForm(p=>({...p,nome:e.target.value})), placeholder: "Ex: Residencial Aurora"  }))
+          , React.createElement(F, { label: "Sigla"}, React.createElement(Inp, { value: form.sigla||"", onChange: e=>setForm(p=>({...p,sigla:e.target.value})), maxLength: 5, placeholder: "RAV"}))
+          , React.createElement(F, { label: "Endereço"}, React.createElement(Inp, { value: form.endereco||"", onChange: e=>setForm(p=>({...p,endereco:e.target.value}))}))
+          , React.createElement(F, { label: "CNPJ"}, React.createElement(Inp, { value: form.cnpj||"", onChange: e=>setForm(p=>({...p,cnpj:e.target.value}))}))
+          , React.createElement(F, { label: "Nº Unidades" }, React.createElement(Inp, { type: "number", value: form.unidades||"", onChange: e=>setForm(p=>({...p,unidades:e.target.value}))}))
+          , React.createElement(F, { label: "Cor"}, React.createElement('input', { type: "color", value: form.cor||"#3B82F6", onChange: e=>setForm(p=>({...p,cor:e.target.value})), className: "h-10 w-full rounded-xl border border-slate-200 cursor-pointer"     }))
+          , React.createElement(F, { label: "Administradora"}, React.createElement(Inp, { value: form.administradora||"", onChange: e=>setForm(p=>({...p,administradora:e.target.value}))}))
+          , React.createElement(F, { label: "Contato Admin." }, React.createElement(Inp, { value: form.contato||"", onChange: e=>setForm(p=>({...p,contato:e.target.value}))}))
+        )
+        , React.createElement('div', { className: "flex justify-end gap-2 mt-5"   }, React.createElement(Btn, { v: "ghost", onClick: ()=>setModal(false)}, "Cancelar"), React.createElement(Btn, { onClick: save_}, "💾 Salvar" ))
+      )
+    )
+  );
+}
+
+// ── Financeiro ─────────────────────────────────────────────────────────────────
+function Financeiro({condos, fin, setFin, sel, user}) {
+  const [modal, setModal] = useState(false);
+  const [form, setForm]   = useState({});
+  const [fMes, setFMes]   = useState("");
+  const [fTipo,setFTipo]  = useState("");
+  const blank = {condo_id:_optionalChain([sel, 'optionalAccess', _2 => _2.id])||_optionalChain([condos, 'access', _3 => _3[0], 'optionalAccess', _4 => _4.id])||"",data:"",mes:"",descricao:"",categoria:"Taxa Condominial",tipo:"Receita",valor:"",status:"Pago",forma_pgto:"Boleto",obs:""};
+  const dados = fin.filter(f=>f && (!sel||f.condo_id===sel.id)&&(!fMes||f.mes===fMes)&&(!fTipo||f.tipo===fTipo));
+  const rec   = dados.filter(f=>f.tipo==="Receita").reduce((s,f)=>s+Number(f.valor||0),0);
+  const dep   = dados.filter(f=>f.tipo==="Despesa").reduce((s,f)=>s+Number(f.valor||0),0);
+  const [saving,setSaving]=useState(false);
+  const save_ = async() => {
+    if(!form.descricao||!form.valor)return; setSaving(true);
+    if(form.id){ const{data}=await db.updFin(form.id,{condo_id:form.condo_id,data:form.data,mes:form.mes,descricao:form.descricao,categoria:form.categoria,tipo:form.tipo,valor:Number(form.valor||0),status:form.status,forma_pgto:form.forma_pgto,obs:form.obs}); setFin(p=>p.map(f=>f.id===form.id?data:f)); }
+    else { const{data}=await db.addFin({condo_id:form.condo_id,data:form.data,mes:form.mes,descricao:form.descricao,categoria:form.categoria,tipo:form.tipo,valor:Number(form.valor||0),status:form.status,forma_pgto:form.forma_pgto,obs:form.obs,owner_id:user.id}); setFin(p=>[data,...p]); }
+    setSaving(false); setModal(false);
+  };
+  const del = async(id) => { if(!confirm("Excluir lançamento?"))return; await db.delFin(id); setFin(p=>p.filter(f=>f.id!==id)); };
+  return (
+    React.createElement('div', { className: "space-y-4"}
+      , React.createElement('div', { className: "flex items-center justify-between flex-wrap gap-2"    }
+        , React.createElement('div', {}, React.createElement('h2', { className: "text-xl font-bold text-slate-800"  }, "Financeiro"), React.createElement('p', { className: "text-slate-400 text-sm" }, dados.length, " lançamento(s)" ))
+        , React.createElement(Btn, { onClick: ()=>{setForm({...blank,condo_id:_optionalChain([sel, 'optionalAccess', _5 => _5.id])||_optionalChain([condos, 'access', _6 => _6[0], 'optionalAccess', _7 => _7.id])||""});setModal(true);}}, "＋ Lançamento" )
+      )
+      , React.createElement('div', { className: "grid grid-cols-3 gap-3"  }
+        , React.createElement(KPI, { label: "Receitas", value: brl(rec), color: "green", icon: "💚"})
+        , React.createElement(KPI, { label: "Despesas", value: brl(dep), color: "red",   icon: "🔴"})
+        , React.createElement(KPI, { label: "Saldo",    value: brl(rec-dep), color: rec-dep>=0?"teal":"red", icon: "⚖️"})
+      )
+      , React.createElement('div', { className: "flex gap-2 flex-wrap"  }
+        , React.createElement(Sel, { value: fMes, onChange: e=>setFMes(e.target.value), style: {width:"auto"}}
+          , React.createElement('option', { value: ""}, "Todos os meses"  ), MESES.map(m=>React.createElement('option', { key: m}, m))
+        )
+        , React.createElement(Sel, { value: fTipo, onChange: e=>setFTipo(e.target.value), style: {width:"auto"}}
+          , React.createElement('option', { value: ""}, "Rec. e Desp."  ), React.createElement('option', {}, "Receita"), React.createElement('option', {}, "Despesa")
+        )
+      )
+      , React.createElement(Card, {}
+        , React.createElement('div', { style: {overflowX:"auto"}}
+          , React.createElement('table', { className: "w-full text-sm" , style: {minWidth:700}}
+            , React.createElement('thead', {}, React.createElement('tr', { className: "border-b border-slate-100" }, ["Data","Mês","Descrição","Categoria","Tipo","Valor","Status",""].map(h=>React.createElement('th', { key: h, className: "px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase"      }, h))))
+            , React.createElement('tbody', {}
+              , dados.map(f=>(
+                React.createElement('tr', { key: f.id, className: "border-b border-slate-50 hover:bg-slate-50"  }
+                  , React.createElement('td', { className: "px-4 py-2.5 text-slate-500 text-xs"   }, f.data)
+                  , React.createElement('td', { className: "px-4 py-2.5 text-slate-500 text-xs"   }, f.mes)
+                  , React.createElement('td', { className: "px-4 py-2.5 font-medium text-slate-800"   }, f.descricao)
+                  , React.createElement('td', { className: "px-4 py-2.5 text-slate-400 text-xs"   }, f.categoria)
+                  , React.createElement('td', { className: "px-4 py-2.5" }, React.createElement(Badge, { color: f.tipo==="Receita"?"green":"red"}, f.tipo))
+                  , React.createElement('td', { className: "px-4 py-2.5 font-bold text-slate-800"   }, brl(f.valor))
+                  , React.createElement('td', { className: "px-4 py-2.5" }, React.createElement(Badge, { color: sc(f.status)}, f.status))
+                  , React.createElement('td', { className: "px-4 py-2.5" }
+                    , React.createElement('div', { className: "flex gap-1" }
+                      , React.createElement('button', { onClick: ()=>{setForm(f);setModal(true);}, className: "p-1 hover:bg-blue-50 rounded-lg text-blue-400"   }, "✏️")
+                      , React.createElement('button', { onClick: ()=>del(f.id), className: "p-1 hover:bg-red-50 rounded-lg text-red-400"   }, "🗑")
+                    )
+                  )
+                )
+              ))
+              , dados.length===0 && React.createElement('tr', {}, React.createElement('td', { colSpan: 8, className: "px-4 py-10 text-center text-slate-300"   }, "Nenhum lançamento" ))
+            )
+          )
+        )
+      )
+      , modal && React.createElement(Modal, { title: form.id?"Editar":"Novo Lançamento", onClose: ()=>setModal(false)}
+        , React.createElement('div', { className: "grid grid-cols-2 gap-3"  }
+          , !sel && React.createElement(F, { label: "Condomínio"}, React.createElement(Sel, { value: form.condo_id||"", onChange: e=>setForm(p=>({...p,condo_id:e.target.value}))}, React.createElement('option', { value: ""}, "Selecione..."), condos.map(c=>React.createElement('option', { key: c.id, value: c.id}, c.nome))))
+          , React.createElement(F, { label: "Data"}, React.createElement(Inp, { type: "date", value: form.data||"", onChange: e=>setForm(p=>({...p,data:e.target.value}))}))
+          , React.createElement(F, { label: "Mês"}, React.createElement(Sel, { value: form.mes||"", onChange: e=>setForm(p=>({...p,mes:e.target.value}))}, React.createElement('option', { value: ""}, "Selecione..."), MESES.map(m=>React.createElement('option', { key: m}, m))))
+          , React.createElement(F, { label: "Descrição"}, React.createElement(Inp, { value: form.descricao||"", onChange: e=>setForm(p=>({...p,descricao:e.target.value}))}))
+          , React.createElement(F, { label: "Categoria"}, React.createElement(Sel, { value: form.categoria||"", onChange: e=>setForm(p=>({...p,categoria:e.target.value}))}, CATS.map(c=>React.createElement('option', { key: c}, c))))
+          , React.createElement(F, { label: "Tipo"}, React.createElement(Sel, { value: form.tipo||"", onChange: e=>setForm(p=>({...p,tipo:e.target.value}))}, React.createElement('option', {}, "Receita"), React.createElement('option', {}, "Despesa")))
+          , React.createElement(F, { label: "Valor (R$)" }, React.createElement(Inp, { type: "number", step: "0.01", value: form.valor||"", onChange: e=>setForm(p=>({...p,valor:e.target.value}))}))
+          , React.createElement(F, { label: "Status"}, React.createElement(Sel, { value: form.status||"", onChange: e=>setForm(p=>({...p,status:e.target.value}))}, React.createElement('option', {}, "Pago"), React.createElement('option', {}, "Em aberto" ), React.createElement('option', {}, "Cancelado")))
+          , React.createElement(F, { label: "Forma Pgto" }, React.createElement(Sel, { value: form.forma_pgto||"", onChange: e=>setForm(p=>({...p,forma_pgto:e.target.value}))}, React.createElement('option', {}, "Boleto"), React.createElement('option', {}, "PIX"), React.createElement('option', {}, "TED"), React.createElement('option', {}, "Débito Auto" ), React.createElement('option', {}, "Dinheiro")))
+          , React.createElement(F, { label: "Obs."}, React.createElement(Tex, { value: form.obs||"", onChange: e=>setForm(p=>({...p,obs:e.target.value}))}))
+        )
+        , React.createElement('div', { className: "flex justify-end gap-2 mt-5"   }, React.createElement(Btn, { v: "ghost", onClick: ()=>setModal(false)}, "Cancelar"), React.createElement(Btn, { onClick: save_}, "💾 Salvar" ))
+      )
+    )
+  );
+}
+
+// ── Inadimplência ──────────────────────────────────────────────────────────────
+function Inadimplencia({condos, inadimplencia, setInadimplencia: setInad, sel, user}) {
+  const [modal, setModal] = useState(false);
+  const [form, setForm]   = useState({});
+  const blank = {condo_id:_optionalChain([sel, 'optionalAccess', _8 => _8.id])||_optionalChain([condos, 'access', _9 => _9[0], 'optionalAccess', _10 => _10.id])||"",mes:"",unidade:"",bloco:"",morador:"",telefone:"",valor:"",dias_atraso:"",status:"Inadimplente",notificacoes:"0",obs:""};
+  const dados  = inadimplencia.filter(i=>!sel||i.condo_id===sel.id);
+  const ativos = dados.filter(i=>i.status==="Inadimplente");
+  const [saving,setSaving]=useState(false);
+  const save_ = async() => {
+    if(!form.morador||!form.valor)return; setSaving(true);
+    if(form.id){ const{data}=await db.updInad(form.id,{condo_id:form.condo_id,mes:form.mes,unidade:form.unidade,bloco:form.bloco,morador:form.morador,telefone:form.telefone,valor:Number(form.valor||0),dias_atraso:form.dias_atraso,status:form.status,notificacoes:form.notificacoes,obs:form.obs}); setInad(p=>p.map(i=>i.id===form.id?data:i)); }
+    else { const{data}=await db.addInad({condo_id:form.condo_id,mes:form.mes,unidade:form.unidade,bloco:form.bloco,morador:form.morador,telefone:form.telefone,valor:Number(form.valor||0),dias_atraso:form.dias_atraso,status:form.status,notificacoes:form.notificacoes,obs:form.obs,owner_id:user.id}); setInad(p=>[data,...p]); }
+    setSaving(false); setModal(false);
+  };
+  const del = async(id) => { if(!confirm("Excluir?"))return; await db.delInad(id); setInad(p=>p.filter(i=>i.id!==id)); };
+  return (
+    React.createElement('div', { className: "space-y-4"}
+      , React.createElement('div', { className: "flex items-center justify-between flex-wrap gap-2"    }
+        , React.createElement('div', {}, React.createElement('h2', { className: "text-xl font-bold text-slate-800"  }, "Inadimplência"), React.createElement('p', { className: "text-slate-400 text-sm" }, ativos.length, " unidade(s) inadimplente(s)"  ))
+        , React.createElement(Btn, { onClick: ()=>{setForm({...blank,condo_id:_optionalChain([sel, 'optionalAccess', _11 => _11.id])||_optionalChain([condos, 'access', _12 => _12[0], 'optionalAccess', _13 => _13.id])||""});setModal(true);}}, "＋ Registrar" )
+      )
+      , React.createElement('div', { className: "grid grid-cols-3 gap-3"  }
+        , React.createElement(KPI, { label: "Inadimplentes",  value: `${ativos.length} unid.`, color: "red",    icon: "⚠️"})
+        , React.createElement(KPI, { label: "Valor em Aberto"  , value: brl(ativos.reduce((s,i)=>s+Number(i.valor||0),0)), color: "amber", icon: "💸"})
+        , React.createElement(KPI, { label: "Em Acordo" ,      value: `${dados.filter(i=>i.status==="Acordo").length} unid.`, color: "purple", icon: "🤝"})
+      )
+      , React.createElement(Card, {}
+        , React.createElement('div', { style: {overflowX:"auto"}}
+          , React.createElement('table', { className: "w-full text-sm" , style: {minWidth:650}}
+            , React.createElement('thead', {}, React.createElement('tr', { className: "border-b border-slate-100" }, ["Mês","Unidade","Morador","Valor","Dias","Notif.","Status",""].map(h=>React.createElement('th', { key: h, className: "px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase"      }, h))))
+            , React.createElement('tbody', {}
+              , dados.map(i=>(
+                React.createElement('tr', { key: i.id, className: "border-b border-slate-50 hover:bg-slate-50"  }
+                  , React.createElement('td', { className: "px-4 py-2.5 text-slate-500 text-xs"   }, i.mes)
+                  , React.createElement('td', { className: "px-4 py-2.5 font-bold text-slate-800"   }, i.unidade, i.bloco&&`/Bl.${i.bloco}`)
+                  , React.createElement('td', { className: "px-4 py-2.5 text-slate-700"  }, i.morador)
+                  , React.createElement('td', { className: "px-4 py-2.5 font-bold text-red-600"   }, brl(i.valor))
+                  , React.createElement('td', { className: "px-4 py-2.5" }, React.createElement('span', { className: `font-bold text-xs ${Number(i.dias_atraso)>30?"text-red-600":"text-amber-500"}`}, i.dias_atraso, "d"))
+                  , React.createElement('td', { className: "px-4 py-2.5 text-center text-slate-500 text-xs"    }, i.notificacoes||0)
+                  , React.createElement('td', { className: "px-4 py-2.5" }, React.createElement(Badge, { color: sc(i.status)}, i.status))
+                  , React.createElement('td', { className: "px-4 py-2.5" }
+                    , React.createElement('div', { className: "flex gap-1" }
+                      , React.createElement('button', { onClick: ()=>{setForm(i);setModal(true);}, className: "p-1 hover:bg-blue-50 rounded-lg text-blue-400"   }, "✏️")
+                      , React.createElement('button', { onClick: ()=>del(i.id), className: "p-1 hover:bg-red-50 rounded-lg text-red-400"   }, "🗑")
+                    )
+                  )
+                )
+              ))
+              , dados.length===0 && React.createElement('tr', {}, React.createElement('td', { colSpan: 8, className: "px-4 py-10 text-center text-slate-300"   }, "Nenhum registro" ))
+            )
+          )
+        )
+      )
+      , modal && React.createElement(Modal, { title: form.id?"Editar":"Novo Registro", onClose: ()=>setModal(false)}
+        , React.createElement('div', { className: "grid grid-cols-2 gap-3"  }
+          , !sel && React.createElement(F, { label: "Condomínio"}, React.createElement(Sel, { value: form.condo_id||"", onChange: e=>setForm(p=>({...p,condo_id:e.target.value}))}, React.createElement('option', { value: ""}, "Selecione..."), condos.map(c=>React.createElement('option', { key: c.id, value: c.id}, c.nome))))
+          , React.createElement(F, { label: "Mês"}, React.createElement(Sel, { value: form.mes||"", onChange: e=>setForm(p=>({...p,mes:e.target.value}))}, React.createElement('option', { value: ""}, "Selecione..."), MESES.map(m=>React.createElement('option', { key: m}, m))))
+          , React.createElement(F, { label: "Unidade"}, React.createElement(Inp, { value: form.unidade||"", onChange: e=>setForm(p=>({...p,unidade:e.target.value}))}))
+          , React.createElement(F, { label: "Bloco"}, React.createElement(Inp, { value: form.bloco||"", onChange: e=>setForm(p=>({...p,bloco:e.target.value}))}))
+          , React.createElement(F, { label: "Morador"}, React.createElement(Inp, { value: form.morador||"", onChange: e=>setForm(p=>({...p,morador:e.target.value}))}))
+          , React.createElement(F, { label: "Telefone"}, React.createElement(Inp, { value: form.telefone||"", onChange: e=>setForm(p=>({...p,telefone:e.target.value}))}))
+          , React.createElement(F, { label: "Valor (R$)" }, React.createElement(Inp, { type: "number", step: "0.01", value: form.valor||"", onChange: e=>setForm(p=>({...p,valor:e.target.value}))}))
+          , React.createElement(F, { label: "Dias em Atraso"  }, React.createElement(Inp, { type: "number", value: form.dias_atraso||"", onChange: e=>setForm(p=>({...p,dias_atraso:e.target.value}))}))
+          , React.createElement(F, { label: "Status"}, React.createElement(Sel, { value: form.status||"", onChange: e=>setForm(p=>({...p,status:e.target.value}))}, React.createElement('option', {}, "Inadimplente"), React.createElement('option', {}, "Acordo"), React.createElement('option', {}, "Ação Judicial" ), React.createElement('option', {}, "Regularizado")))
+          , React.createElement(F, { label: "Notificações"}, React.createElement(Inp, { type: "number", value: form.notificacoes||"", onChange: e=>setForm(p=>({...p,notificacoes:e.target.value}))}))
+          , React.createElement(F, { label: "Obs."}, React.createElement(Tex, { value: form.obs||"", onChange: e=>setForm(p=>({...p,obs:e.target.value}))}))
+        )
+        , React.createElement('div', { className: "flex justify-end gap-2 mt-5"   }, React.createElement(Btn, { v: "ghost", onClick: ()=>setModal(false)}, "Cancelar"), React.createElement(Btn, { onClick: save_}, "💾 Salvar" ))
+      )
+    )
+  );
+}
+
+// ── Ocorrências ────────────────────────────────────────────────────────────────
+function Ocorrencias({condos, ocorrencias, setOcorrencias: setOco, sel, user}) {
+  const [modal, setModal] = useState(false);
+  const [form, setForm]   = useState({});
+  const [fSt, setFSt]     = useState("");
+  const blank = {condo_id:_optionalChain([sel, 'optionalAccess', _14 => _14.id])||_optionalChain([condos, 'access', _15 => _15[0], 'optionalAccess', _16 => _16.id])||"",data:"",mes:"",unidade:"",morador:"",tipo:"Reclamação",prioridade:"Média",descricao:"",status:"Aberta",responsavel:"",resolucao:""};
+  const dados  = ocorrencias.filter(o=>(!sel||o.condo_id===sel.id)&&(!fSt||o.status===fSt));
+  const genNum = (condoId, data) => {
+    const idx = ocorrencias.filter(o=>o.condo_id===condoId).length + 1;
+    const ms  = ["JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
+    if(!data) return String(idx).padStart(2,"0");
+    const d = new Date(data+"T12:00:00");
+    return `${String(idx).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}${ms[d.getMonth()]}.${d.getFullYear()}`;
+  };
+  const [saving,setSaving]=useState(false);
+  const save_ = async() => {
+    if(!form.descricao)return; setSaving(true);
+    const pl={condo_id:form.condo_id,data:form.data,mes:form.mes,unidade:form.unidade,morador:form.morador,tipo:form.tipo,prioridade:form.prioridade,descricao:form.descricao,status:form.status,responsavel:form.responsavel,resolucao:form.resolucao};
+    if(form.id){ const{data}=await db.updOco(form.id,pl); setOco(p=>p.map(o=>o.id===form.id?data:o)); }
+    else { const{data}=await db.addOco({...pl,numero:genNum(form.condo_id,form.data),owner_id:user.id}); setOco(p=>[data,...p]); }
+    setSaving(false); setModal(false);
+  };
+  const del = async(id) => { if(!confirm("Excluir?"))return; await db.delOco(id); setOco(p=>p.filter(o=>o.id!==id)); };
+  const pc    = p => ({Alta:"red",Média:"yellow",Baixa:"blue"}[p]||"gray");
+  return (
+    React.createElement('div', { className: "space-y-4"}
+      , React.createElement('div', { className: "flex items-center justify-between flex-wrap gap-2"    }
+        , React.createElement('div', {}, React.createElement('h2', { className: "text-xl font-bold text-slate-800"  }, "Ocorrências"), React.createElement('p', { className: "text-slate-400 text-sm" }, dados.length, " registro(s)" ))
+        , React.createElement(Btn, { onClick: ()=>{setForm({...blank,condo_id:_optionalChain([sel, 'optionalAccess', _17 => _17.id])||_optionalChain([condos, 'access', _18 => _18[0], 'optionalAccess', _19 => _19.id])||""});setModal(true);}}, "＋ Nova" )
+      )
+      , React.createElement('div', { className: "grid grid-cols-3 gap-3"  }
+        , React.createElement(KPI, { label: "Abertas",       value: ocorrencias.filter(o=>(!sel||o.condo_id===sel.id)&&o.status==="Aberta").length,       color: "red",   icon: "🔴"})
+        , React.createElement(KPI, { label: "Em Andamento" ,  value: ocorrencias.filter(o=>(!sel||o.condo_id===sel.id)&&o.status==="Em andamento").length, color: "amber", icon: "🔄"})
+        , React.createElement(KPI, { label: "Resolvidas",    value: ocorrencias.filter(o=>(!sel||o.condo_id===sel.id)&&o.status==="Resolvida").length,    color: "green", icon: "✅"})
+      )
+      , React.createElement('div', { className: "flex gap-2" }
+        , React.createElement(Sel, { value: fSt, onChange: e=>setFSt(e.target.value), style: {width:"auto"}}
+          , React.createElement('option', { value: ""}, "Todos os status"  ), React.createElement('option', {}, "Aberta"), React.createElement('option', {}, "Em andamento" ), React.createElement('option', {}, "Resolvida"), React.createElement('option', {}, "Cancelada")
+        )
+      )
+      , React.createElement('div', { className: "space-y-2"}
+        , dados.map(o=>(
+          React.createElement(Card, { key: o.id, className: "p-4 hover:shadow-sm transition-shadow"  }
+            , React.createElement('div', { className: "flex items-start gap-3"  }
+              , React.createElement('div', { className: `w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${o.status==="Aberta"?"bg-red-500":o.status==="Em andamento"?"bg-amber-400":o.status==="Resolvida"?"bg-emerald-500":"bg-slate-300"}`})
+              , React.createElement('div', { className: "flex-1 min-w-0" }
+                , React.createElement('div', { className: "flex flex-wrap items-center gap-2 mb-1"    }
+                  , React.createElement('span', { className: "text-xs font-mono font-bold text-slate-400"   }, o.numero)
+                  , React.createElement(Badge, { color: pc(o.prioridade)}, o.prioridade)
+                  , React.createElement(Badge, { color: sc(o.status)}, o.status)
+                  , React.createElement('span', { className: "text-xs text-slate-400" }, o.data)
+                )
+                , React.createElement('p', { className: "font-semibold text-slate-800 text-sm"  }, o.descricao)
+                , React.createElement('p', { className: "text-xs text-slate-400 mt-0.5"  }, "Unid. " , o.unidade, " · "  , o.morador, " · "  , o.tipo)
+                , o.resolucao && React.createElement('p', { className: "text-xs text-emerald-600 mt-1"  }, "✓ " , o.resolucao)
+              )
+              , React.createElement('div', { className: "flex gap-1 flex-shrink-0"  }
+                , React.createElement('button', { onClick: ()=>{setForm(o);setModal(true);}, className: "p-1 hover:bg-blue-50 rounded-lg text-blue-400"   }, "✏️")
+                , React.createElement('button', { onClick: ()=>del(o.id), className: "p-1 hover:bg-red-50 rounded-lg text-red-400"   }, "🗑")
+              )
+            )
+          )
+        ))
+        , dados.length===0 && React.createElement(Card, { className: "p-10 text-center text-slate-300"  }, "Nenhuma ocorrência encontrada"  )
+      )
+      , modal && React.createElement(Modal, { title: form.id?"Editar":"Nova Ocorrência", onClose: ()=>setModal(false)}
+        , React.createElement('div', { className: "grid grid-cols-2 gap-3"  }
+          , !sel && React.createElement(F, { label: "Condomínio"}, React.createElement(Sel, { value: form.condo_id||"", onChange: e=>setForm(p=>({...p,condo_id:e.target.value}))}, React.createElement('option', { value: ""}, "Selecione..."), condos.map(c=>React.createElement('option', { key: c.id, value: c.id}, c.nome))))
+          , React.createElement(F, { label: "Data"}, React.createElement(Inp, { type: "date", value: form.data||"", onChange: e=>setForm(p=>({...p,data:e.target.value}))}))
+          , React.createElement(F, { label: "Mês"}, React.createElement(Sel, { value: form.mes||"", onChange: e=>setForm(p=>({...p,mes:e.target.value}))}, React.createElement('option', { value: ""}, "Selecione..."), MESES.map(m=>React.createElement('option', { key: m}, m))))
+          , React.createElement(F, { label: "Unidade"}, React.createElement(Inp, { value: form.unidade||"", onChange: e=>setForm(p=>({...p,unidade:e.target.value}))}))
+          , React.createElement(F, { label: "Morador"}, React.createElement(Inp, { value: form.morador||"", onChange: e=>setForm(p=>({...p,morador:e.target.value}))}))
+          , React.createElement(F, { label: "Tipo"}, React.createElement(Sel, { value: form.tipo||"", onChange: e=>setForm(p=>({...p,tipo:e.target.value}))}, React.createElement('option', {}, "Reclamação"), React.createElement('option', {}, "Solicitação"), React.createElement('option', {}, "Manutenção"), React.createElement('option', {}, "Emergência"), React.createElement('option', {}, "Sugestão")))
+          , React.createElement(F, { label: "Prioridade"}, React.createElement(Sel, { value: form.prioridade||"", onChange: e=>setForm(p=>({...p,prioridade:e.target.value}))}, React.createElement('option', {}, "Alta"), React.createElement('option', {}, "Média"), React.createElement('option', {}, "Baixa")))
+          , React.createElement(F, { label: "Descrição"}, React.createElement(Tex, { value: form.descricao||"", onChange: e=>setForm(p=>({...p,descricao:e.target.value}))}))
+          , React.createElement(F, { label: "Status"}, React.createElement(Sel, { value: form.status||"", onChange: e=>setForm(p=>({...p,status:e.target.value}))}, React.createElement('option', {}, "Aberta"), React.createElement('option', {}, "Em andamento" ), React.createElement('option', {}, "Resolvida"), React.createElement('option', {}, "Cancelada")))
+          , React.createElement(F, { label: "Responsável"}, React.createElement(Inp, { value: form.responsavel||"", onChange: e=>setForm(p=>({...p,responsavel:e.target.value}))}))
+          , React.createElement(F, { label: "Resolução"}, React.createElement(Tex, { value: form.resolucao||"", onChange: e=>setForm(p=>({...p,resolucao:e.target.value}))}))
+        )
+        , React.createElement('div', { className: "flex justify-end gap-2 mt-5"   }, React.createElement(Btn, { v: "ghost", onClick: ()=>setModal(false)}, "Cancelar"), React.createElement(Btn, { onClick: save_}, "💾 Salvar" ))
+      )
+    )
+  );
+}
+
+// ── Manutenções ────────────────────────────────────────────────────────────────
+function Manutencoes({condos, manutencoes, setManutencoes: setMan, sel, user}) {
+  const [modal, setModal] = useState(false);
+  const [form, setForm]   = useState({});
+  const blank = {condo_id:_optionalChain([sel, 'optionalAccess', _20 => _20.id])||_optionalChain([condos, 'access', _21 => _21[0], 'optionalAccess', _22 => _22.id])||"",data:"",mes:"",tipo:"Preventiva",area:"",descricao:"",fornecedor:"",valor:"",status:"Agendada",os:"",obs:""};
+  const dados  = manutencoes.filter(m=>!sel||m.condo_id===sel.id);
+  const [saving,setSaving]=useState(false);
+  const save_ = async() => {
+    if(!form.descricao)return; setSaving(true);
+    const pl={condo_id:form.condo_id,data:form.data,mes:form.mes,tipo:form.tipo,area:form.area,descricao:form.descricao,fornecedor:form.fornecedor,valor:Number(form.valor||0),status:form.status,os:form.os,obs:form.obs};
+    if(form.id){ const{data}=await db.updMan(form.id,pl); setMan(p=>p.map(m=>m.id===form.id?data:m)); }
+    else { const{data}=await db.addMan({...pl,owner_id:user.id}); setMan(p=>[data,...p]); }
+    setSaving(false); setModal(false);
+  };
+  const del = async(id) => { if(!confirm("Excluir?"))return; await db.delMan(id); setMan(p=>p.filter(m=>m.id!==id)); };
+  const tc     = t => ({Preventiva:"green",Corretiva:"red",Emergencial:"red","Inspeção":"blue"}[t]||"gray");
+  return (
+    React.createElement('div', { className: "space-y-4"}
+      , React.createElement('div', { className: "flex items-center justify-between flex-wrap gap-2"    }
+        , React.createElement('div', {}, React.createElement('h2', { className: "text-xl font-bold text-slate-800"  }, "Manutenções"), React.createElement('p', { className: "text-slate-400 text-sm" }, dados.length, " registro(s)" ))
+        , React.createElement(Btn, { onClick: ()=>{setForm({...blank,condo_id:_optionalChain([sel, 'optionalAccess', _23 => _23.id])||_optionalChain([condos, 'access', _24 => _24[0], 'optionalAccess', _25 => _25.id])||""});setModal(true);}}, "＋ Nova" )
+      )
+      , React.createElement('div', { className: "grid grid-cols-3 gap-3"  }
+        , React.createElement(KPI, { label: "Total Gasto" , value: brl(dados.filter(m=>m.status==="Concluída").reduce((s,m)=>s+Number(m.valor||0),0)), color: "blue",  icon: "🔧"})
+        , React.createElement(KPI, { label: "Pendentes",   value: dados.filter(m=>m.status==="Agendada").length,                                       color: "amber", icon: "⏳"})
+        , React.createElement(KPI, { label: "Concluídas",  value: dados.filter(m=>m.status==="Concluída").length,                                      color: "green", icon: "✅"})
+      )
+      , React.createElement(Card, {}
+        , React.createElement('div', { style: {overflowX:"auto"}}
+          , React.createElement('table', { className: "w-full text-sm" , style: {minWidth:700}}
+            , React.createElement('thead', {}, React.createElement('tr', { className: "border-b border-slate-100" }, ["Data","Tipo","Área/Sistema","Fornecedor","Valor","Status","OS",""].map(h=>React.createElement('th', { key: h, className: "px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase"      }, h))))
+            , React.createElement('tbody', {}
+              , dados.map(m=>(
+                React.createElement('tr', { key: m.id, className: "border-b border-slate-50 hover:bg-slate-50"  }
+                  , React.createElement('td', { className: "px-4 py-2.5 text-slate-500 text-xs"   }, m.data)
+                  , React.createElement('td', { className: "px-4 py-2.5" }, React.createElement(Badge, { color: tc(m.tipo)}, m.tipo))
+                  , React.createElement('td', { className: "px-4 py-2.5 font-medium text-slate-800"   }, m.area)
+                  , React.createElement('td', { className: "px-4 py-2.5 text-slate-400 text-xs"   }, m.fornecedor)
+                  , React.createElement('td', { className: "px-4 py-2.5 font-bold text-slate-800"   }, brl(m.valor))
+                  , React.createElement('td', { className: "px-4 py-2.5" }, React.createElement(Badge, { color: sc(m.status)}, m.status))
+                  , React.createElement('td', { className: "px-4 py-2.5 text-slate-400 text-xs"   }, m.os)
+                  , React.createElement('td', { className: "px-4 py-2.5" }
+                    , React.createElement('div', { className: "flex gap-1" }
+                      , React.createElement('button', { onClick: ()=>{setForm(m);setModal(true);}, className: "p-1 hover:bg-blue-50 rounded-lg text-blue-400"   }, "✏️")
+                      , React.createElement('button', { onClick: ()=>del(m.id), className: "p-1 hover:bg-red-50 rounded-lg text-red-400"   }, "🗑")
+                    )
+                  )
+                )
+              ))
+              , dados.length===0 && React.createElement('tr', {}, React.createElement('td', { colSpan: 8, className: "px-4 py-10 text-center text-slate-300"   }, "Nenhuma manutenção" ))
+            )
+          )
+        )
+      )
+      , modal && React.createElement(Modal, { title: form.id?"Editar":"Nova Manutenção", onClose: ()=>setModal(false)}
+        , React.createElement('div', { className: "grid grid-cols-2 gap-3"  }
+          , !sel && React.createElement(F, { label: "Condomínio"}, React.createElement(Sel, { value: form.condo_id||"", onChange: e=>setForm(p=>({...p,condo_id:e.target.value}))}, React.createElement('option', { value: ""}, "Selecione..."), condos.map(c=>React.createElement('option', { key: c.id, value: c.id}, c.nome))))
+          , React.createElement(F, { label: "Data"}, React.createElement(Inp, { type: "date", value: form.data||"", onChange: e=>setForm(p=>({...p,data:e.target.value}))}))
+          , React.createElement(F, { label: "Mês"}, React.createElement(Sel, { value: form.mes||"", onChange: e=>setForm(p=>({...p,mes:e.target.value}))}, React.createElement('option', { value: ""}, "Selecione..."), MESES.map(m=>React.createElement('option', { key: m}, m))))
+          , React.createElement(F, { label: "Tipo"}, React.createElement(Sel, { value: form.tipo||"", onChange: e=>setForm(p=>({...p,tipo:e.target.value}))}, React.createElement('option', {}, "Preventiva"), React.createElement('option', {}, "Corretiva"), React.createElement('option', {}, "Emergencial"), React.createElement('option', {}, "Inspeção")))
+          , React.createElement(F, { label: "Área/Sistema"}, React.createElement(Inp, { value: form.area||"", onChange: e=>setForm(p=>({...p,area:e.target.value})), placeholder: "Ex: Elevadores" }))
+          , React.createElement(F, { label: "Descrição"}, React.createElement(Tex, { value: form.descricao||"", onChange: e=>setForm(p=>({...p,descricao:e.target.value}))}))
+          , React.createElement(F, { label: "Fornecedor"}, React.createElement(Inp, { value: form.fornecedor||"", onChange: e=>setForm(p=>({...p,fornecedor:e.target.value}))}))
+          , React.createElement(F, { label: "Valor (R$)" }, React.createElement(Inp, { type: "number", step: "0.01", value: form.valor||"", onChange: e=>setForm(p=>({...p,valor:e.target.value}))}))
+          , React.createElement(F, { label: "Status"}, React.createElement(Sel, { value: form.status||"", onChange: e=>setForm(p=>({...p,status:e.target.value}))}, React.createElement('option', {}, "Agendada"), React.createElement('option', {}, "Em execução" ), React.createElement('option', {}, "Concluída"), React.createElement('option', {}, "Cancelada")))
+          , React.createElement(F, { label: "OS/Contrato"}, React.createElement(Inp, { value: form.os||"", onChange: e=>setForm(p=>({...p,os:e.target.value}))}))
+        )
+        , React.createElement('div', { className: "flex justify-end gap-2 mt-5"   }, React.createElement(Btn, { v: "ghost", onClick: ()=>setModal(false)}, "Cancelar"), React.createElement(Btn, { onClick: save_}, "💾 Salvar" ))
+      )
+    )
+  );
+}
+
+// ── Orçamento ──────────────────────────────────────────────────────────────────
+function Orcamento({condos, fin, sel, user}) {
+  const [condoSel, setCondoSel] = useState(_optionalChain([sel, 'optionalAccess', _26 => _26.id])||_optionalChain([condos, 'access', _27 => _27[0], 'optionalAccess', _28 => _28.id])||"");
+  const [ano, setAno] = useState("2025");
+  const [prev, setPrev] = useState({});
+  const [saving,setSaving]=useState(false);
+  useEffect(()=>{
+    if(!condoSel)return;
+    (async()=>{
+      const{data}=await db.getOrc(condoSel,ano);
+      const m={};(data||[]).forEach(r=>{m[r.categoria]=r.valor;});setPrev(m);
+    })();
+  },[condoSel,ano]);
+
+  const SECS = {
+    "💚 RECEITAS":          {items:["Taxa Condominial","Fundo de Reserva","Multas","Aluguel Áreas Comuns","Outras Receitas"],    tipo:"Receita",  bg:"#059669"},
+    "🔵 DESPESAS FIXAS":    {items:["Salário Zelador/Porteiro","Encargos Trabalhistas","Contrato Administradora","Seguro","Outras Fixas"], tipo:"Despesa",  bg:"#1e3a5f"},
+    "🟠 DESPESAS VARIÁVEIS":{items:["Água","Energia Elétrica","Manutenção Corretiva","Material de Limpeza","Outros Variáveis"],  tipo:"Despesa",  bg:"#92400e"},
+    "🟣 FUNDO DE RESERVA":  {items:["Fundo de Reserva Mensal","Fundo de Obras","Outras Reservas"],                              tipo:"Despesa",  bg:"#5b21b6"},
+  };
+  const gP = (cat)   => Number(prev[cat]||0);
+  const sP = async(cat,v) => {
+    setPrev(p=>({...p,[cat]:v})); setSaving(true);
+    await db.upsertOrc({condo_id:condoSel,owner_id:user.id,ano,categoria:cat,valor:Number(v||0)});
+    setSaving(false);
+  };
+  const gR = (cat, tipo) => fin.filter(f=>f.condo_id===condoSel&&f.categoria===cat&&f.tipo===tipo).reduce((s,f)=>s+Number(f.valor||0),0);
+
+  const allRec = SECS["💚 RECEITAS"].items;
+  const allDesp = [...SECS["🔵 DESPESAS FIXAS"].items,...SECS["🟠 DESPESAS VARIÁVEIS"].items,...SECS["🟣 FUNDO DE RESERVA"].items];
+  const totPR=allRec.reduce((s,c)=>s+gP(c),0),  totRR=allRec.reduce((s,c)=>s+gR(c,"Receita"),0);
+  const totPD=allDesp.reduce((s,c)=>s+gP(c),0), totRD=allDesp.reduce((s,c)=>s+gR(c,"Despesa"),0);
+
+  return (
+    React.createElement('div', { className: "space-y-4"}
+      , React.createElement('div', { className: "flex items-center justify-between flex-wrap gap-2"    }
+        , React.createElement('div', { className: "flex items-center gap-3"  }, React.createElement('h2', { className: "text-xl font-bold text-slate-800"  }, "Orçamento"), saving&&React.createElement('span', { style: {fontSize:11,color:"#10b981",fontWeight:600}}, "💾 Salvando..." ))
+        , React.createElement('div', { className: "flex gap-2" }, !sel && React.createElement(Sel, { value: condoSel, onChange: e=>setCondoSel(e.target.value), style: {width:"auto"}}, condos.map(c=>React.createElement('option', { key: c.id, value: c.id}, c.nome))), React.createElement(Sel, { value: ano, onChange: e=>setAno(e.target.value), style: {width:"auto"}}, React.createElement('option', {}, "2024"), React.createElement('option', {}, "2025"), React.createElement('option', {}, "2026"))), "}"
+      )
+      , React.createElement('div', { className: "grid grid-cols-2 lg:grid-cols-4 gap-3"   }
+        , React.createElement(KPI, { label: "Rec. Previstas" ,   value: brl(totPR), color: "green",  icon: "📋"})
+        , React.createElement(KPI, { label: "Rec. Realizadas" ,  value: brl(totRR), color: "teal",   icon: "💰"})
+        , React.createElement(KPI, { label: "Desp. Previstas" ,  value: brl(totPD), color: "red",    icon: "📋"})
+        , React.createElement(KPI, { label: "Desp. Realizadas" , value: brl(totRD), color: "amber",  icon: "💸"})
+      )
+      , React.createElement(Card, { className: "overflow-hidden"}
+        , React.createElement('div', { style: {overflowX:"auto"}}
+          , React.createElement('table', { className: "w-full text-sm" , style: {minWidth:600}}
+            , React.createElement('thead', {}
+              , React.createElement('tr', { style: {background:"#1e293b",color:"white"}}
+                , React.createElement('th', { className: "px-4 py-3 text-left text-xs font-bold uppercase"     }, "Categoria")
+                , React.createElement('th', { className: "px-4 py-3 text-right text-xs font-bold uppercase"     }, "Previsto (R$)" )
+                , React.createElement('th', { className: "px-4 py-3 text-right text-xs font-bold uppercase"     }, "Realizado (R$)" )
+                , React.createElement('th', { className: "px-4 py-3 text-right text-xs font-bold uppercase"     }, "Variação")
+                , React.createElement('th', { className: "px-4 py-3 text-center text-xs font-bold uppercase"     }, "Status")
+              )
+            )
+            , React.createElement('tbody', {}
+              , Object.entries(SECS).map(([sec,{items,tipo,bg}])=>(
+                React.createElement(React.Fragment, { key: sec}
+                  , React.createElement('tr', { style: {background:bg,color:"white"}}
+                    , React.createElement('td', { colSpan: 5, className: "px-4 py-2 font-bold text-xs"   }, sec)
+                  )
+                  , items.map((cat,i)=>{
+                    const p=gP(cat), r=gR(cat,tipo), v=r-p;
+                    return (
+                      React.createElement('tr', { key: cat, className: `border-b border-slate-100 hover:bg-slate-50 ${i%2===0?"bg-white":"bg-slate-50"}`}
+                        , React.createElement('td', { className: "px-4 py-2.5 font-medium text-slate-700 text-sm"    }, cat)
+                        , React.createElement('td', { className: "px-4 py-2.5 text-right"  }
+                          , React.createElement('input', { type: "number", step: "0.01", value: p||"", onChange: e=>sP(cat,e.target.value),
+                            style: {width:110,textAlign:"right",border:"1px solid #bfdbfe",borderRadius:8,padding:"2px 8px",fontSize:12,background:"#eff6ff",color:"#1e40af",fontWeight:600},
+                            placeholder: "0,00"})
+                        )
+                        , React.createElement('td', { className: "px-4 py-2.5 text-right font-bold text-slate-800"    }, brl(r))
+                        , React.createElement('td', { className: `px-4 py-2.5 text-right font-bold text-xs ${v>=0?"text-emerald-600":"text-red-500"}`}, v>=0?"+":"", brl(v))
+                        , React.createElement('td', { className: "px-4 py-2.5 text-center"  }, p===0?React.createElement(Badge, {}, "—"):r>=p?React.createElement(Badge, { color: "green"}, "✅ OK" ):React.createElement(Badge, { color: "red"}, "⚠️ Abaixo" ))
+                      )
+                    );
+                  })
+                  , React.createElement('tr', { style: {background:"#f1f5f9",fontWeight:700}, className: "border-b-2 border-slate-200" }
+                    , (()=>{const tp=items.reduce((s,c)=>s+gP(c),0),tr=items.reduce((s,c)=>s+gR(c,tipo),0),tv=tr-tp;
+                    return(React.createElement(React.Fragment, null, React.createElement('td', { className: "px-4 py-2.5 text-slate-600 text-xs uppercase"    }, "Total"), React.createElement('td', { className: "px-4 py-2.5 text-right text-xs"   }, brl(tp)), React.createElement('td', { className: "px-4 py-2.5 text-right text-xs"   }, brl(tr)), React.createElement('td', { className: `px-4 py-2.5 text-right text-xs ${tv>=0?"text-emerald-600":"text-red-500"}`}, tv>=0?"+":"", brl(tv)), React.createElement('td', { className: "px-4 py-2.5 text-center"  }, tp===0?React.createElement(Badge, {}, "—"):tr>=tp?React.createElement(Badge, { color: "green"}, "✅"):React.createElement(Badge, { color: "red"}, "⚠️"))));})()
+                  )
+                )
+              ))
+              , React.createElement('tr', { style: {background:"#1e293b",color:"white",fontWeight:700}}
+                , React.createElement('td', { className: "px-4 py-3 text-sm"  }, "💰 SALDO (Receitas − Despesas)"    )
+                , React.createElement('td', { className: "px-4 py-3 text-right text-sm"   }, brl(totPR-totPD))
+                , React.createElement('td', { className: "px-4 py-3 text-right text-sm"   }, brl(totRR-totRD))
+                , React.createElement('td', { colSpan: 2, className: `px-4 py-3 text-right text-sm ${totRR-totRD>=0?"text-emerald-300":"text-red-300"}`}
+                  , totRR-totRD>=0?"Superávit":"Déficit", ": " , brl(Math.abs(totRR-totRD))
+                )
+              )
+            )
+          )
+        )
+      )
+      , React.createElement('p', { className: "text-xs text-slate-400 text-center"  }, "💡 Edite os valores em azul (Previsto) diretamente na tabela — salvos automaticamente no navegador."              )
+    )
+  );
+}
+
+
+// ── TELA DE LOGIN ─────────────────────────────────────────────
+function LoginScreen({onLogin}) {
+  const [tab,    setTab]    = useState("login");
+  const [email,  setEmail]  = useState("");
+  const [senha,  setSenha]  = useState("");
+  const [nome,   setNome]   = useState("");
+  const [loading,setLoading]= useState(false);
+  const [msg,    setMsg]    = useState(null);
+  const [tipo,   setTipo]   = useState("ok");
+  const alert_ = (t,tp="ok") => { setMsg(t); setTipo(tp); setTimeout(()=>setMsg(null),5000); };
+
+  const login = async () => {
+    if(!email||!senha) return alert_("Preencha email e senha.","err");
+    setLoading(true);
+    const {data,error} = await sb.auth.signInWithPassword({email,password:senha});
+    setLoading(false);
+    if(error) return alert_(error.message==="Invalid login credentials"?"Email ou senha incorretos.":error.message,"err");
+    onLogin(data.user);
+  };
+  const cadastro = async () => {
+    if(!nome||!email||!senha) return alert_("Preencha todos os campos.","err");
+    if(senha.length<6) return alert_("Senha: mínimo 6 caracteres.","err");
+    setLoading(true);
+    const {error} = await sb.auth.signUp({email,password:senha,options:{data:{nome,role:"sindica"}}});
+    setLoading(false);
+    if(error) return alert_(error.message,"err");
+    alert_("Conta criada! Confirme pelo email para entrar.");
+    setTab("login");
+  };
+  const recuperar = async () => {
+    if(!email) return alert_("Informe seu email.","err");
+    setLoading(true);
+    await sb.auth.resetPasswordForEmail(email);
+    setLoading(false);
+    alert_("Link de recuperação enviado ao seu email!");
+  };
+
+  return (
+    React.createElement('div', { style: {minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:16,background:"linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%)"}}
+      , React.createElement('div', { style: {width:"100%",maxWidth:420}}
+        , React.createElement('div', { style: {textAlign:"center",marginBottom:32}}
+          , React.createElement('div', { style: {width:64,height:64,borderRadius:16,background:"#10b981",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,margin:"0 auto 16px"}}, "🏢")
+          , React.createElement('h1', { style: {color:"white",fontSize:28,fontWeight:800,margin:"0 0 4px"}}, "Portal do Síndico"  )
+          , React.createElement('p', { style: {color:"#94a3b8",margin:0,fontSize:14}}, "Gestão profissional de condomínios"   )
+        )
+        , React.createElement('div', { style: {background:"white",borderRadius:24,padding:32,boxShadow:"0 25px 50px rgba(0,0,0,0.4)"}}
+          , tab!=="recuperar" && (
+            React.createElement('div', { style: {display:"flex",background:"#f1f5f9",borderRadius:12,padding:4,marginBottom:24}}
+              , [["login","Entrar"],["cadastro","Criar Conta"]].map(([t,l])=>(
+                React.createElement('button', { key: t, onClick: ()=>setTab(t), style: {flex:1,padding:"8px 0",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:tab===t?"white":"transparent",color:tab===t?"#1e293b":"#94a3b8",boxShadow:tab===t?"0 1px 3px rgba(0,0,0,0.1)":"none",transition:"all 0.15s"}}, l)
+              ))
+            )
+          )
+          , msg && React.createElement('div', { style: {marginBottom:16,padding:"12px 16px",borderRadius:12,fontSize:13,fontWeight:500,background:tipo==="err"?"#fef2f2":"#f0fdf4",color:tipo==="err"?"#dc2626":"#16a34a"}}, msg)
+
+          , tab==="login" && React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:16}}
+            , React.createElement(F, { label: "Email"}, React.createElement(Inp, { type: "email", value: email, onChange: e=>setEmail(e.target.value), placeholder: "seu@email.com", onKeyDown: e=>e.key==="Enter"&&login()}))
+            , React.createElement(F, { label: "Senha"}, React.createElement(Inp, { type: "password", value: senha, onChange: e=>setSenha(e.target.value), placeholder: "••••••", onKeyDown: e=>e.key==="Enter"&&login()}))
+            , React.createElement('button', { onClick: login, disabled: loading, style: {width:"100%",padding:"12px 0",borderRadius:12,border:"none",cursor:"pointer",background:"#2563eb",color:"white",fontSize:15,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}
+              , loading?React.createElement(React.Fragment, null, React.createElement('div', { style: {width:16,height:16,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"white",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}), " Entrando..." ):"Entrar"
+            )
+            , React.createElement('p', { style: {textAlign:"center",margin:0,fontSize:13,color:"#94a3b8"}}
+              , React.createElement('button', { onClick: ()=>setTab("recuperar"), style: {background:"none",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:13}}, "Esqueci minha senha"  )
+            )
+          )
+
+          , tab==="cadastro" && React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:14}}
+            , React.createElement(F, { label: "Seu Nome" }, React.createElement(Inp, { value: nome, onChange: e=>setNome(e.target.value), placeholder: "Maria Silva" }))
+            , React.createElement(F, { label: "Email"}, React.createElement(Inp, { type: "email", value: email, onChange: e=>setEmail(e.target.value), placeholder: "seu@email.com"}))
+            , React.createElement(F, { label: "Senha (mín. 6 caracteres)"   }, React.createElement(Inp, { type: "password", value: senha, onChange: e=>setSenha(e.target.value), placeholder: "••••••"}))
+            , React.createElement('button', { onClick: cadastro, disabled: loading, style: {width:"100%",padding:"12px 0",borderRadius:12,border:"none",cursor:"pointer",background:"#10b981",color:"white",fontSize:15,fontWeight:700}}
+              , loading?"Criando conta...":"✅ Criar Conta Grátis"
+            )
+          )
+
+          , tab==="recuperar" && React.createElement('div', { style: {display:"flex",flexDirection:"column",gap:16}}
+            , React.createElement('h2', { style: {margin:"0 0 4px",fontSize:18,fontWeight:700,color:"#1e293b"}}, "Recuperar Senha" )
+            , React.createElement('p', { style: {margin:0,fontSize:13,color:"#64748b"}}, "Informe seu email e enviaremos um link para redefinir a senha."          )
+            , React.createElement(F, { label: "Email"}, React.createElement(Inp, { type: "email", value: email, onChange: e=>setEmail(e.target.value), placeholder: "seu@email.com"}))
+            , React.createElement('button', { onClick: recuperar, disabled: loading, style: {width:"100%",padding:"12px 0",borderRadius:12,border:"none",cursor:"pointer",background:"#2563eb",color:"white",fontSize:15,fontWeight:700}}
+              , loading?"Enviando...":"📧 Enviar Link"
+            )
+            , React.createElement('p', { style: {textAlign:"center",margin:0}}, React.createElement('button', { onClick: ()=>setTab("login"), style: {background:"none",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:13}}, "← Voltar ao login"   ))
+          )
+        )
+        , React.createElement('p', { style: {textAlign:"center",color:"#475569",fontSize:11,marginTop:16}}, "Dados seguros · Powered by Supabase"     )
+      )
+      , React.createElement('style', {}, "@keyframes spin{to{transform:rotate(360deg)}}")
+    )
+  );
+}
+
+// ── App Principal ──────────────────────────────────────────────────────────────
+function App() {
+  const [user,    setUser]    = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [mod,     setMod]     = useState("dashboard");
+  const [sel,     setSel]     = useState(null);
+  const [side,    setSide]    = useState(true);
+  const [condos,  setCondos]  = useState([]);
+  const [fin,     setFin]     = useState([]);
+  const [inad,    setInad]    = useState([]);
+  const [oco,     setOco]     = useState([]);
+  const [man,     setMan]     = useState([]);
+  const [dbLoading, setDbLoading] = useState(false);
+
+  const loadAll = async () => {
+    setDbLoading(true);
+    const [c,f,i,o,m] = await Promise.all([db.getCondos(),db.getFin(),db.getInad(),db.getOco(),db.getMan()]);
+    setCondos(c.data||[]); setFin(f.data||[]); setInad(i.data||[]); setOco(o.data||[]); setMan(m.data||[]);
+    setDbLoading(false);
+  };
+
+  useEffect(()=>{
+    // Safety net - never hang forever
+    const safetyTimer = setTimeout(() => setLoading(false), 8000);
+
+    const {data:{subscription}} = sb.auth.onAuthStateChange(async(event, session)=>{
+      clearTimeout(safetyTimer);
+      if(_optionalChain([session, 'optionalAccess', _30 => _30.user])){
+        setUser(session.user);
+        await loadAll();
+      } else {
+        setUser(null);
+        setCondos([]); setFin([]); setInad([]); setOco([]); setMan([]);
+      }
+      setLoading(false);
+    });
+
+    return ()=>{ subscription.unsubscribe(); clearTimeout(safetyTimer); };
+  },[]);
+
+  const logout = async () => { await sb.auth.signOut(); setUser(null); setMod("dashboard"); setSel(null); };
+
+  const nav = [
+    {id:"dashboard",    label:"Dashboard",      icon:"🏠"},
+    {id:"condos",       label:"Condomínios",    icon:"🏢"},
+    {id:"financeiro",   label:"Financeiro",     icon:"💰"},
+    {id:"inadimplencia",label:"Inadimplência",  icon:"⚠️"},
+    {id:"ocorrencias",  label:"Ocorrências",    icon:"📩"},
+    {id:"manutencoes",  label:"Manutenções",    icon:"🔧"},
+    {id:"orcamento",    label:"Orçamento",      icon:"💼"},
+  ];
+
+  const inadAtivos  = inad.filter(i=>i && i.status==="Inadimplente").length;
+  const ocoAbertas  = oco.filter(o=>o && o.status==="Aberta").length;
+  const nomeUsr     = _optionalChain([user, 'optionalAccess', _31 => _31.user_metadata, 'optionalAccess', _32 => _32.nome]) || _optionalChain([user, 'optionalAccess', _33 => _33.email, 'optionalAccess', _34 => _34.split, 'call', _35 => _35("@"), 'access', _36 => _36[0]]) || "S";
+
+  if (loading) return (React.createElement('div', { style: {display:"flex",height:"100vh",alignItems:"center",justifyContent:"center",background:"#f8fafc"}}, React.createElement('div', { style: {textAlign:"center"}}, React.createElement('div', { style: {width:40,height:40,border:"4px solid #e2e8f0",borderTopColor:"#10b981",borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 16px"}}), React.createElement('p', { style: {color:"#64748b",fontWeight:600}}, "Carregando..."))));
+
+  if (!user) return React.createElement(LoginScreen, { onLogin: u => { setUser(u); loadAll(); }} );
+
+  return (
+    React.createElement('div', { style: {display:"flex",height:"100vh",overflow:"hidden",fontFamily:"'DM Sans',system-ui,sans-serif",background:"#f8fafc"}}
+
+      /* Sidebar */
+      , React.createElement('div', { style: {width:side?232:60,flexShrink:0,background:"#0f172a",display:"flex",flexDirection:"column",transition:"width 0.2s",zIndex:10}}
+        /* Logo */
+        , React.createElement('div', { style: {display:"flex",alignItems:"center",gap:10,padding:"14px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}
+          , React.createElement('div', { style: {width:36,height:36,borderRadius:10,background:"#10b981",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}, "🏢")
+          , side && React.createElement('div', { style: {flex:1,minWidth:0}}, React.createElement('p', { style: {color:"white",fontWeight:700,fontSize:13,margin:0}}, "Portal Síndico" ), React.createElement('p', { style: {color:"#64748b",fontSize:11,margin:0}}, "Profissional"))
+          , React.createElement('button', { onClick: ()=>setSide(p=>!p), style: {background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:12,marginLeft:"auto",flexShrink:0}}, side?"◀":"▶")
+        )
+
+        /* Filtro */
+        , side && (
+          React.createElement('div', { style: {padding:"8px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}
+            , React.createElement('p', { style: {color:"#475569",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6,padding:"0 4px"}}, "Filtrar por" )
+            , React.createElement('button', { onClick: ()=>setSel(null), style: {width:"100%",textAlign:"left",padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:!sel?"#10b981":"transparent",color:!sel?"white":"#94a3b8",marginBottom:2}}, "🌐 Todos" )
+            , condos.map(c=>(
+              React.createElement('button', { key: c.id, onClick: ()=>setSel(c), style: {width:"100%",textAlign:"left",padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:8,background:_optionalChain([sel, 'optionalAccess', _37 => _37.id])===c.id?"#334155":"transparent",color:_optionalChain([sel, 'optionalAccess', _38 => _38.id])===c.id?"white":"#94a3b8",marginBottom:2}}
+                , React.createElement('div', { style: {width:8,height:8,borderRadius:"50%",background:c.cor||"#3B82F6",flexShrink:0}})
+                , React.createElement('span', { style: {overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}, c.sigla||c.nome)
+              )
+            ))
+          )
+        )
+
+        /* Nav */
+        , React.createElement('nav', { style: {flex:1,padding:"8px 8px",overflowY:"auto"}}
+          , nav.map(n=>(
+            React.createElement('button', { key: n.id, onClick: ()=>setMod(n.id), style: {width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:10,border:"none",cursor:"pointer",fontSize:13,fontWeight:500,background:mod===n.id?"#1e293b":"transparent",color:mod===n.id?"white":"#94a3b8",marginBottom:2,textAlign:"left",transition:"all 0.15s"}}
+              , React.createElement('span', { style: {fontSize:17,flexShrink:0}}, n.icon)
+              , side && React.createElement('span', { style: {flex:1}}, n.label)
+              , side && mod===n.id && React.createElement('div', { style: {width:6,height:6,borderRadius:"50%",background:"#10b981",flexShrink:0}})
+            )
+          ))
+        )
+        , side && React.createElement('div', { style: {padding:"8px 16px",borderTop:"1px solid rgba(255,255,255,0.06)"}}
+          , React.createElement('p', { style: {color:"#334155",fontSize:10,textAlign:"center",margin:0}}, "Dados salvos no navegador"   )
+        )
+      )
+
+      /* Main */
+      , React.createElement('div', { style: {flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}
+        /* Header */
+        , React.createElement('div', { style: {background:"white",borderBottom:"1px solid #f1f5f9",padding:"10px 20px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}
+          , React.createElement('div', { style: {flex:1}}
+            , sel
+              ? React.createElement('div', { style: {display:"flex",alignItems:"center",gap:8}}, React.createElement('div', { style: {width:10,height:10,borderRadius:"50%",background:sel.cor||"#3B82F6"}}), React.createElement('span', { style: {fontWeight:700,color:"#1e293b",fontSize:14}}, sel.nome), React.createElement('span', { style: {color:"#94a3b8",fontSize:12}}, "· " , sel.unidades, " unidades" ))
+              : React.createElement('span', { style: {fontWeight:700,color:"#1e293b",fontSize:14}}, "Todos os "  , condos.length, " condomínio(s)" )
+            
+          )
+          , React.createElement('div', { style: {display:"flex",gap:8,alignItems:"center"}}
+            , inadAtivos>0 && React.createElement('div', { style: {background:"#fef2f2",color:"#dc2626",padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:700}}, "⚠️ " , inadAtivos, " inad." )
+            , ocoAbertas>0 && React.createElement('div', { style: {background:"#fffbeb",color:"#d97706",padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:700}}, "📩 " , ocoAbertas, " aber." )
+            , React.createElement('div', { style: {width:32,height:32,borderRadius:"50%",background:"#d1fae5",display:"flex",alignItems:"center",justifyContent:"center",color:"#059669",fontWeight:700,fontSize:13}}, nomeUsr[0].toUpperCase())
+          )
+        )
+
+        /* Content */
+        , React.createElement('div', { style: {flex:1,overflowY:"auto",padding:"20px"}}
+          , mod==="dashboard"      && React.createElement(Dashboard, {   condos: condos, financeiro: fin, inadimplencia: inad, ocorrencias: oco, manutencoes: man, sel: sel})
+          , mod==="condos"         && React.createElement(Condos, {      condos: condos, setCondos: setCondos, user: user})
+          , mod==="financeiro"     && React.createElement(Financeiro, { condos: condos, fin: fin, setFin: setFin, sel: sel, user: user})
+          , mod==="inadimplencia"  && React.createElement(Inadimplencia, { condos: condos, inadimplencia: inad, setInadimplencia: setInad, sel: sel, user: user})
+          , mod==="ocorrencias"    && React.createElement(Ocorrencias, { condos: condos, ocorrencias: oco, setOcorrencias: setOco, sel: sel, user: user})
+          , mod==="manutencoes"    && React.createElement(Manutencoes, { condos: condos, manutencoes: man,  setManutencoes: setMan, sel: sel, user: user})
+          , mod==="orcamento"      && React.createElement(Orcamento, {   condos: condos, fin: fin, sel: sel, user: user})
+        )
+      )
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, {}));
+</script>
+</body>
+</html>
