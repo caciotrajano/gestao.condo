@@ -402,7 +402,7 @@ function Condos({condos, setCondos, user}) {
               , React.createElement('div', { className: "w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg flex-shrink-0"         , style: {background:c.cor||"#3B82F6"}}, c.sigla||c.nome[0])
               , React.createElement('div', { className: "flex-1 min-w-0" }, React.createElement('h3', { className: "font-bold text-slate-800 truncate text-sm"   }, c.nome), React.createElement('p', { className: "text-xs text-slate-400 truncate"  }, c.endereco))
             )
-            , React.createElement('div', { className: "grid-2col" style:{marginBottom:12}   }
+            , React.createElement('div', { className: "grid-2col", style:{marginBottom:12}   }
               , [["Unidades",c.unidades||"—"],["CNPJ",c.cnpj||"—"],["Administradora",c.administradora||"—"],["Contato",c.contato||"—"]].map(([l,v])=>(
                 React.createElement('div', { key: l, className: "bg-slate-50 rounded-lg p-2"  }, React.createElement('p', { className: "text-xs text-slate-400" }, l), React.createElement('p', { className: "font-semibold text-slate-700 text-xs truncate"   }, v))
               ))
