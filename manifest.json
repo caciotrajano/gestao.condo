@@ -1,0 +1,66 @@
+{
+  "name": "Portal Síndico Profissional",
+  "short_name": "Portal Síndico",
+  "description": "Gestão completa de condomínios — financeiro, inadimplência, ocorrências e manutenções",
+  "start_url": "/gestao.condo/",
+  "scope": "/gestao.condo/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f2044",
+  "theme_color": "#0f2044",
+  "lang": "pt-BR",
+  "categories": ["business", "finance", "productivity"],
+  "icons": [
+    {
+      "src": "favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Dashboard do Portal Síndico"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/gestao.condo/#dashboard",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Financeiro",
+      "short_name": "Financeiro",
+      "url": "/gestao.condo/#financeiro",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Inadimplência",
+      "short_name": "Inadimpl.",
+      "url": "/gestao.condo/#inadimplencia",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
