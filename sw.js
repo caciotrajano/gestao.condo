@@ -1,115 +1,65 @@
-// ── Portal Síndico — Service Worker v8 ──────────────────────────────────────
-// Estratégia: Network First para HTML/API, Cache First para assets estáticos
-
-const CACHE_NAME   = 'portal-sindico-v8';
-const CACHE_STATIC = 'portal-sindico-static-v8';
-
+// Portal do Síndico Profissional — Service Worker v9
+// v9: force cache refresh Fase 2
+const CACHE_NAME = 'portal-sindico-v9';
 const STATIC_ASSETS = [
-  'https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js',
-  'https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js',
+  './',
+  './index.html',
+  './manifest.json',
 ];
 
-// ── INSTALL ──────────────────────────────────────────────────────────────────
+// Install — abre o novo cache
 self.addEventListener('install', event => {
-  console.log('[SW] Instalando v8...');
+  console.log('[SW v9] Install');
   event.waitUntil(
-    caches.open(CACHE_STATIC)
-      .then(cache =>
-        Promise.allSettled(
-          STATIC_ASSETS.map(url =>
-            cache.add(url).catch(e => console.warn('[SW] Nao cacheou:', url, e.message))
-          )
-        )
-      )
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
   );
+  self.skipWaiting(); // ativa imediatamente sem esperar aba fechar
 });
 
-// ── ACTIVATE ─────────────────────────────────────────────────────────────────
+// Activate — limpa caches antigos
 self.addEventListener('activate', event => {
-  console.log('[SW] Ativando v8...');
+  console.log('[SW v9] Activate — limpando caches antigos');
   event.waitUntil(
-    caches.keys()
-      .then(keys =>
-        Promise.all(
-          keys
-            .filter(k => k !== CACHE_NAME && k !== CACHE_STATIC)
-            .map(k => { console.log('[SW] Removendo cache antigo:', k); return caches.delete(k); })
-        )
+    caches.keys().then(keys =>
+      Promise.all(
+        keys.filter(k => k !== CACHE_NAME).map(k => {
+          console.log('[SW v9] Deletando cache antigo:', k);
+          return caches.delete(k);
+        })
       )
-      .then(() => self.clients.claim())
+    ).then(() => self.clients.claim()) // assume controle de todas as abas
   );
 });
 
-// ── FETCH ────────────────────────────────────────────────────────────────────
+// Fetch — Network First para index.html, Cache First para o resto
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Supabase → nunca interceptar
-  if (url.hostname.includes('supabase.co')) return;
-
-  // index.html / navegacao → Network First
-  if (event.request.mode === 'navigate' ||
-      url.pathname.endsWith('/') ||
-      url.pathname.endsWith('index.html')) {
-    event.respondWith(networkFirst(event.request));
+  // Sempre busca index.html na rede (garante versão mais recente)
+  if (url.pathname.endsWith('/') || url.pathname.endsWith('index.html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
     return;
   }
 
-  // CDN externo → Cache First
-  if (url.hostname !== self.location.hostname) {
-    event.respondWith(cacheFirst(event.request));
-    return;
-  }
-
-  // Assets locais → Network First
-  event.respondWith(networkFirst(event.request));
-});
-
-// ── Network First ─────────────────────────────────────────────────────────────
-async function networkFirst(request) {
-  try {
-    const response = await fetch(request);
-    if (response && response.status === 200) {
-      const cache = await caches.open(CACHE_NAME);
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch (e) {
-    const cached = await caches.match(request);
-    if (cached) return cached;
-    if (request.mode === 'navigate') {
-      return new Response(
-        '<html><body style="font-family:sans-serif;text-align:center;padding:40px">' +
-        '<h2>Sem conexao</h2><p>Verifique sua internet e tente novamente.</p>' +
-        '<button onclick="location.reload()">Tentar novamente</button></body></html>',
-        { headers: { 'Content-Type': 'text/html' } }
-      );
-    }
-    throw e;
-  }
-}
-
-// ── Cache First (stale-while-revalidate) ─────────────────────────────────────
-async function cacheFirst(request) {
-  const cached = await caches.match(request);
-  if (cached) {
-    fetch(request)
-      .then(r => { if (r && r.status === 200) caches.open(CACHE_STATIC).then(c => c.put(request, r)); })
-      .catch(() => {});
-    return cached;
-  }
-  try {
-    const response = await fetch(request);
-    if (response && response.status === 200) {
-      const cache = await caches.open(CACHE_STATIC);
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch (e) { throw e; }
-}
-
-// ── Mensagens ─────────────────────────────────────────────────────────────────
-self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+  // Cache First para demais assets estáticos
+  event.respondWith(
+    caches.match(event.request).then(cached => {
+      if (cached) return cached;
+      return fetch(event.request).then(response => {
+        if (response && response.status === 200 && response.type === 'basic') {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        }
+        return response;
+      });
+    })
+  );
 });
