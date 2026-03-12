@@ -1,0 +1,76 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# GOV-03: Backup automático via GitHub Actions
+# Arquivo: .github/workflows/backup.yml
+# Roda todo dia às 04:00 UTC (01:00 horário de Brasília)
+# Salva o backup como GitHub Actions Artifact (retido por 30 dias)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+name: Backup Diário do Banco de Dados
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # 07:00 UTC = 04:00 BRT (horário de Brasília UTC-3)
+  workflow_dispatch:        # Permite rodar manualmente pelo GitHub UI
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Instalar PostgreSQL Client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+
+      - name: Executar pg_dump e compactar
+        env:
+          DB_URL: ${{ secrets.PORTAL_SINDICO_DB_URL }}
+        run: |
+          TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+          FILENAME="portal-sindico_${TIMESTAMP}.sql.gz"
+          
+          pg_dump "$DB_URL" \
+            --no-password \
+            --format=plain \
+            --no-acl \
+            --no-owner \
+            --schema=public \
+            --table=clientes \
+            --table=condominios \
+            --table=condominos \
+            --table=financeiro \
+            --table=inadimplencia \
+            --table=ocorrencias \
+            --table=manutencoes \
+            --table=orcamento \
+            --table=config_planos \
+          | gzip > "$FILENAME"
+          
+          SIZE=$(du -sh "$FILENAME" | cut -f1)
+          echo "✅ Backup gerado: $FILENAME ($SIZE)"
+          echo "BACKUP_FILE=$FILENAME" >> $GITHUB_ENV
+
+      - name: Salvar backup como Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-${{ github.run_id }}
+          path: portal-sindico_*.sql.gz
+          retention-days: 30    # GitHub mantém por 30 dias
+
+      - name: Notificar resultado
+        if: failure()
+        run: |
+          echo "❌ FALHA no backup diário! Verifique: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Adicione aqui notificação por email/Slack se desejar
+
+# ─── SETUP NECESSÁRIO ─────────────────────────────────────────────────────────
+# 1. No GitHub: Settings → Secrets and variables → Actions → New repository secret
+#    Nome: PORTAL_SINDICO_DB_URL
+#    Valor: postgresql://postgres:[SENHA]@db.[PROJETO_ID].supabase.co:5432/postgres
+#
+# 2. Commitar este arquivo em: .github/workflows/backup.yml
+#
+# 3. Para restaurar um backup:
+#    - Baixe o artifact do GitHub Actions
+#    - gunzip portal-sindico_TIMESTAMP.sql.gz
+#    - psql "$DB_URL" < portal-sindico_TIMESTAMP.sql
