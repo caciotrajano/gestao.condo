@@ -1,65 +1,109 @@
-// Portal do Síndico Profissional — Service Worker v9
-// v9: force cache refresh Fase 2
-const CACHE_NAME = 'portal-sindico-v9';
+// Portal do Síndico Profissional — Service Worker v10
+// v10: F3-04 — estratégia definitiva Network First + auto-reload
+
+const CACHE_NAME = 'portal-sindico-v10';
 const STATIC_ASSETS = [
   './',
   './index.html',
   './manifest.json',
+  './template_importacao_condominio.xlsx',
 ];
 
-// Install — abre o novo cache
+// ── Install ────────────────────────────────────────────────────────────────────
 self.addEventListener('install', event => {
-  console.log('[SW v9] Install');
+  console.log('[SW v10] Install');
+  // skipWaiting: ativa imediatamente, não espera aba fechar
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
   );
-  self.skipWaiting(); // ativa imediatamente sem esperar aba fechar
 });
 
-// Activate — limpa caches antigos
+// ── Activate ───────────────────────────────────────────────────────────────────
 self.addEventListener('activate', event => {
-  console.log('[SW v9] Activate — limpando caches antigos');
+  console.log('[SW v10] Activate — limpando caches antigos');
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys.filter(k => k !== CACHE_NAME).map(k => {
-          console.log('[SW v9] Deletando cache antigo:', k);
-          return caches.delete(k);
-        })
-      )
-    ).then(() => self.clients.claim()) // assume controle de todas as abas
+    caches.keys()
+      .then(keys => Promise.all(
+        keys
+          .filter(k => k !== CACHE_NAME)
+          .map(k => { console.log('[SW v10] Removendo:', k); return caches.delete(k); })
+      ))
+      .then(() => {
+        console.log('[SW v10] Assumindo controle de todas as abas');
+        return self.clients.claim(); // assume controle imediato de todas as abas abertas
+      })
+      .then(() => {
+        // Notifica todas as abas para recarregar com a versão nova
+        return self.clients.matchAll({ type: 'window' }).then(clients => {
+          clients.forEach(client => client.postMessage({ type: 'SW_UPDATED' }));
+        });
+      })
   );
 });
 
-// Fetch — Network First para index.html, Cache First para o resto
+// ── Fetch ──────────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Sempre busca index.html na rede (garante versão mais recente)
-  if (url.pathname.endsWith('/') || url.pathname.endsWith('index.html')) {
+  // Ignora requests não-GET e de outras origens
+  if (event.request.method !== 'GET') return;
+  if (!url.origin.includes('caciotrajano.github.io') && 
+      !url.origin.includes('localhost')) return;
+
+  // Network First para index.html, privacidade.html, termos.html
+  // Garante que o usuário sempre recebe a versão mais recente
+  if (
+    url.pathname.endsWith('/') ||
+    url.pathname.endsWith('index.html') ||
+    url.pathname.endsWith('privacidade.html') ||
+    url.pathname.endsWith('termos.html')
+  ) {
     event.respondWith(
       fetch(event.request)
         .then(response => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          }
           return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => {
+          console.log('[SW v10] Offline — servindo cache para:', url.pathname);
+          return caches.match(event.request);
+        })
     );
     return;
   }
 
-  // Cache First para demais assets estáticos
+  // Cache First para sw.js e manifest.json (mudam raramente)
+  if (url.pathname.endsWith('sw.js') || url.pathname.endsWith('manifest.json')) {
+    event.respondWith(
+      caches.match(event.request).then(cached => cached || fetch(event.request))
+    );
+    return;
+  }
+
+  // Stale-While-Revalidate para demais assets (xlsx, imagens, etc.)
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached;
-      return fetch(event.request).then(response => {
-        if (response && response.status === 200 && response.type === 'basic') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      });
-    })
+    caches.open(CACHE_NAME).then(cache =>
+      cache.match(event.request).then(cached => {
+        const fetchPromise = fetch(event.request).then(response => {
+          if (response && response.status === 200) {
+            cache.put(event.request, response.clone());
+          }
+          return response;
+        });
+        return cached || fetchPromise;
+      })
+    )
   );
+});
+
+// ── Mensagens ──────────────────────────────────────────────────────────────────
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    console.log('[SW v10] SKIP_WAITING recebido');
+    self.skipWaiting();
+  }
 });
