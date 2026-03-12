@@ -3774,15 +3774,15 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
       .then(reg => {
-        console.log('[PWA] SW registrado v8:', reg.scope);
+        console.log('[PWA] SW registrado v10:', reg.scope);
+        // Força verificação de atualização imediata
         reg.update();
         reg.addEventListener('updatefound', () => {
           const nw = reg.installing;
           nw.addEventListener('statechange', () => {
             if (nw.state === 'installed') {
-              if (navigator.serviceWorker.controller) {
-                nw.postMessage({ type: 'SKIP_WAITING' });
-              }
+              // Novo SW disponível — ativa imediatamente e recarrega
+              nw.postMessage({ type: 'SKIP_WAITING' });
             }
           });
         });
@@ -3790,8 +3790,17 @@ if ('serviceWorker' in navigator) {
       .catch(err => console.warn('[PWA] Falha:', err));
   });
   let refreshing = false;
+  // Recarrega quando o SW assume controle (controllerchange)
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!refreshing) { refreshing = true; window.location.reload(); }
+  });
+  // Recarrega quando SW v10 envia mensagem SW_UPDATED
+  navigator.serviceWorker.addEventListener('message', event => {
+    if (event.data && event.data.type === 'SW_UPDATED' && !refreshing) {
+      console.log('[PWA] Nova versão disponível — recarregando...');
+      refreshing = true;
+      window.location.reload();
+    }
   });
 }
 
