@@ -1427,14 +1427,15 @@ function LoginScreen({onLogin}) {
       return alert_("Seu cadastro ainda não foi ativado. Aguarde a confirmação do administrador.", "err");
     }
     // Email autorizado — cria conta
-    const {error} = await sb.auth.signUp({email,password:senha,options:{data:{nome,role:"sindico"}}});
+    const {data: signUpData, error} = await sb.auth.signUp({email,password:senha,options:{data:{nome,role:"sindico"}}});
     if(error){ setLoading(false); return alert_(error.message,"err"); }
-    // LGPD-02: registra aceite dos termos com data/hora
+    // LGPD-02: registra aceite dos termos com data/hora + owner_id
     try {
       await sb.from("clientes").update({
         termos_aceitos: true,
         termos_aceitos_em: new Date().toISOString(),
-        nome: nome
+        nome: nome,
+        owner_id: signUpData.user?.id
       }).eq("email", email);
     } catch(e) { console.warn("Aviso: não foi possível registrar aceite dos termos.", e.message); }
     setLoading(false);
