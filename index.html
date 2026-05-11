@@ -6223,18 +6223,24 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 <script>
 // ── Registro do Service Worker (PWA) ─────────────────────────────────────────
 if ('serviceWorker' in navigator) {
+  // Guarda se já havia um SW ativo ANTES desta carga de página
+  const hadController = !!navigator.serviceWorker.controller;
+  let refreshing = false;
+
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
       .then(reg => {
-        console.log('[PWA] SW registrado v10.22:', reg.scope);
-        // Verifica atualização imediatamente e a cada 60s
-        reg.update();
-        setInterval(() => reg.update(), 60000);
+        console.log('[PWA] SW registrado:', reg.scope);
+        // Só verifica atualização quando a aba volta a ficar visível
+        // (evita loop de update a cada 60s)
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update();
+        });
         reg.addEventListener('updatefound', () => {
           const nw = reg.installing;
           nw.addEventListener('statechange', () => {
+            // Só ativa o novo SW se já havia um SW anterior (atualização real)
             if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-              // Novo SW pronto — ativa imediatamente
               nw.postMessage({ type: 'SKIP_WAITING' });
             }
           });
@@ -6242,21 +6248,17 @@ if ('serviceWorker' in navigator) {
       })
       .catch(err => console.warn('[PWA] Falha:', err));
   });
-  let refreshing = false;
-  // Recarrega quando o SW assume controle (controllerchange)
+
+  // Recarrega APENAS quando há troca real de SW (não na primeira instalação)
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!refreshing) { refreshing = true; window.location.reload(); }
-  });
-  // Recarrega quando SW v10 envia mensagem SW_UPDATED
-  navigator.serviceWorker.addEventListener('message', event => {
-    if (event.data && event.data.type === 'SW_UPDATED' && !refreshing) {
-      console.log('[PWA] Nova versão disponível — recarregando...');
+    if (!refreshing && hadController) {
       refreshing = true;
       window.location.reload();
     }
   });
-}
 
+  // SW_UPDATED: ignora — controllerchange já cuida do reload
+}
 // ── Prompt de instalação (Android) ───────────────────────────────────────────
 let deferredPrompt;
 window.addEventListener('beforeinstallprompt', (e) => {
