@@ -1756,7 +1756,7 @@ function LoginScreen({onLogin}) {
     if(!email) return alert_("Informe seu email.","err");
     setLoading(true);
     const redirectTo = window.location.origin + window.location.pathname;
-    await sb.auth.resetPasswordForEmail(email, { redirectTo });
+    const {error} = await sb.auth.resetPasswordForEmail(email, {redirectTo});
     setLoading(false);
     alert_("Link de recuperação enviado ao seu email! Clique no link recebido e você será redirecionado para redefinir a senha.");
   };
