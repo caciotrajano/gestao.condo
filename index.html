@@ -295,7 +295,7 @@ const isValorPersonalizado = (cliente) => {
   if (!cliente?.plano || !cliente?.valor_mensalidade) return false;
   return Number(cliente.valor_mensalidade) !== Number(getPlano(cliente.plano).valor_padrao);
 };
-const sb = createClient(SUPA_URL, SUPA_KEY, { auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: false, flowType: "implicit" } });
+const sb = createClient(SUPA_URL, SUPA_KEY, { auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true, flowType: "implicit" } });
 const uid = () => Math.random().toString(36).slice(2, 10);
 const brl = (v) => Number(v||0).toLocaleString("pt-BR", {style:"currency", currency:"BRL"});
 
