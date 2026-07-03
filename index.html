@@ -5947,11 +5947,7 @@ function App() {
       }
     });
 
-    // Also try getSession directly
-    // sb.auth.getSession().then(({data:{session}}) => {
-    //  clearTimeout(safetyTimer);
-    //  finish(session);
-    // }).catch(() => { clearTimeout(safetyTimer); finish(null); });
+
 
     return ()=>{ subscription.unsubscribe(); clearTimeout(safetyTimer); };
   },[]);
